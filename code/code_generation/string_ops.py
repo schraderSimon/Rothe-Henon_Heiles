@@ -1,5 +1,4 @@
-
-newstring="""mu3x=einsum('i,i,i->i',mu[1:],mu[1:],mu[1:])
+newstring = """mu3x=einsum('i,i,i->i',mu[1:],mu[1:],mu[1:])
     fourth_expecs=make_integrals(matrix,order=4)
     sixth_expecs=make_integrals(matrix,order=6)
     contraction_1=einsum('k,l,i,j->kl',mu,mu,mu3x,mu3x)  
@@ -451,11 +450,11 @@ newstring="""mu3x=einsum('i,i,i->i',mu[1:],mu[1:],mu[1:])
 
 for line in newstring.splitlines():
     if "einsum" in line:
-        first,second,third=line.split("'") 
-        pre_arrow,post_arrow=second.split("->")
-        pre_arrow=pre_arrow.replace(",",",a")
-        pre_arrow="a"+pre_arrow
-        new_second=pre_arrow+"->a"+post_arrow
-        print(first,"'"+new_second+"'",third)
+        first, second, third = line.split("'")
+        pre_arrow, post_arrow = second.split("->")
+        pre_arrow = pre_arrow.replace(",", ",a")
+        pre_arrow = "a" + pre_arrow
+        new_second = pre_arrow + "->a" + post_arrow
+        print(first, "'" + new_second + "'", third)
     else:
         print(line)
