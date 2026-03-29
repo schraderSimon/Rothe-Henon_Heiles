@@ -1,12 +1,12 @@
+import os
 import time
-import warnings
 
-# import multiprocessing
 import h5py
-import scipy
-from numpy import arcsin, arctanh, cos, cosh, sin, tanh
+import numpy as np
+from numpy import arctanh, conj, cosh, log, sqrt, tanh
+from numpy.linalg import inv
 from scipy.optimize import fmin_bfgs, minimize
-from WF_HenonHeiles import *
+from WF_HenonHeiles import WF
 
 numiter = 0
 

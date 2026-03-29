@@ -1,5 +1,3 @@
-import sympy
-
 from sympy import *
 
 init_printing()
@@ -41,6 +39,8 @@ MsymSquared = Msym * Msym
 expr2 = 0
 for k in range(n):
     expr2 += Msym[k, k]  # Trace term
-expr2 += (4 * mu.T @ MsymSquared @ r - 2 * r.T @ MsymSquared @ r - 2 * mu.T @ MsymSquared @ mu)[0]
+expr2 += (
+    4 * mu.T @ MsymSquared @ r - 2 * r.T @ MsymSquared @ r - 2 * mu.T @ MsymSquared @ mu
+)[0]
 print("Removing terms term by term")
 pprint((collected - expr2).simplify())

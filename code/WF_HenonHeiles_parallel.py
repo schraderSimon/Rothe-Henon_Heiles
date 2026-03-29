@@ -1,28 +1,23 @@
 import warnings
 
 warnings.filterwarnings("ignore", message="Derivative was zero.")  # Ignore error message
-import time
-import sys
 import itertools as it
-from mpi4py import MPI  # type: ignore
-from scipy.linalg import logm, expm, sqrtm
-from numpy.linalg import eigvals
 
-# from jax.numpy.linalg import eigvals
 import numpy as np
-from numpy import sqrt, pi, einsum, log, exp, real, imag, conj
+from mpi4py import MPI
+from numpy import conj, einsum, imag, pi, real, sqrt
+from numpy.linalg import eigvals
+from scipy.linalg import sqrtm
 
-# from opt_einsum import contract as einsum
 np.set_printoptions(linewidth=300, precision=5)
-import os
 
-# from scipy.linalg import sqrtm,svd, det,inv, eig, eigh
+from calculate_all_integrals_at_once import (
+    calculate_all_expectation_values_full_allij,
+    get_x7_x8_contraction_allij,
+)
 from numpy.linalg import det
-import sys
-from scipy.optimize import root_scalar, newton, bisect, minimize
 from utils import solve
-from utils_heller import *
-from calculate_all_integrals_at_once import calculate_all_expectation_values_full_allij, get_x7_x8_contraction_allij
+from utils_heller import transform_ECG_heller, transform_heller_ECG
 
 dx = 1e-7
 
@@ -59,7 +54,14 @@ def update_sum_matrices(matrices, pairs_of_indices, sum_matrices, sum_matrices_i
 
 class WF:
     def __init__(
-        self, nonlin_params, lin_params, lambda_=0.1, normalization=1, calculate_Gradient=True, h=1e-3, onlyX1X2=False
+        self,
+        nonlin_params,
+        lin_params,
+        lambda_=0.1,
+        normalization=1,
+        calculate_Gradient=True,
+        h=1e-3,
+        onlyX1X2=False,
     ):
         self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
@@ -71,10 +73,12 @@ class WF:
         nonlin_params: list of list or 2D array all parameters. The general form is (ngauss,n(n+3))), where n is the dimensionality of the problem
         lin_params: list of same length as nonlin_params
         lambda: Strength of the Henon-Heiles interaction
-        normalization: The normalization of the WF. 
+        normalization: The normalization of the WF.
         """
         self.num_gaussians = len(lin_params)
-        self.nd = self.num_dimensions = np.rint(0.5 * (-3 + sqrt(4 * len(nonlin_params[0]) + 9))).astype(
+        self.nd = self.num_dimensions = np.rint(
+            0.5 * (-3 + sqrt(4 * len(nonlin_params[0]) + 9))
+        ).astype(
             int
         )  # This is the invert formula of nparams = n*(n+3) for the number of dimensions
         self.nonlin_params = np.asarray(nonlin_params)
@@ -88,11 +92,8 @@ class WF:
         self.h = h
         self.setupintermediates()
         self.setupmyintermediates()
-        # start=time.time()
         self.overlap = self.calculate_myoverlapmatrix(self.myrow_indices, self.mycol_indices)
         self.comm.Allreduce(MPI.IN_PLACE, [self.overlap, MPI.COMPLEX16], op=MPI.SUM)
-        # end=time.time()
-        # print("Time to calculate overlap matrix on rank %d: %f"%(self.rank,end-start))
         myovlp = self.myovlp
         myvals = self.myvals
 
@@ -104,12 +105,16 @@ class WF:
         counter = len(i_indices)
 
         # Access the relevant elements using advanced indexing for cross_mat_inv_list
-        cross_mat_inv_list = np.zeros((counter,) + self.sum_matrices_inv.shape[2:], dtype=np.complex128)
+        cross_mat_inv_list = np.zeros(
+            (counter,) + self.sum_matrices_inv.shape[2:], dtype=np.complex128
+        )
         mu_list = np.zeros((counter, len(self.vectors[0])), dtype=np.complex128)
 
         for idx, (i, j) in enumerate(zip(i_indices, j_indices)):
             cross_mat_inv_list[idx] = self.sum_matrices_inv[i, j]
-            bvec = self.vectors[j].T @ self.matrices[j] + np.conjugate(self.vectors[i].T @ self.matrices[i])
+            bvec = self.vectors[j].T @ self.matrices[j] + np.conjugate(
+                self.vectors[i].T @ self.matrices[i]
+            )
             mu_list[idx] = cross_mat_inv_list[idx] @ bvec
 
         mymu = mu_list[myvals[rank] : myvals[rank + 1]]
@@ -131,38 +136,44 @@ class WF:
                 self.x1_temp = np.empty((myTotnumOfElements, self.nd), dtype=np.complex128)
                 self.x1_temp = x1_temp
                 # self.x1_temp[mymatrices_removeIndices]=0
-                self.x2_temp = np.empty((myTotnumOfElements, self.nd, self.nd), dtype=np.complex128)
+                self.x2_temp = np.empty(
+                    (myTotnumOfElements, self.nd, self.nd), dtype=np.complex128
+                )
                 self.x2_temp = x2_temp
                 # self.x2_temp[mymatrices_removeIndices]=0
 
             else:
-                x1_temp, x2_temp, x3_temp, x4_temp, x5_temp, x6_temp = calculate_all_expectation_values_full_allij(
-                    mymu_of_interest, mymatrices_of_interest, myovlp_of_interest
+                x1_temp, x2_temp, x3_temp, x4_temp, x5_temp, x6_temp = (
+                    calculate_all_expectation_values_full_allij(
+                        mymu_of_interest, mymatrices_of_interest, myovlp_of_interest
+                    )
                 )
                 self.x1_temp = np.empty((myTotnumOfElements, self.nd), dtype=np.complex128)
                 self.x1_temp = x1_temp
-                # self.x1_temp[mymatrices_removeIndices]=0
-                self.x2_temp = np.empty((myTotnumOfElements, self.nd, self.nd), dtype=np.complex128)
+                self.x2_temp = np.empty(
+                    (myTotnumOfElements, self.nd, self.nd), dtype=np.complex128
+                )
                 self.x2_temp = x2_temp
-                # self.x2_temp[mymatrices_removeIndices]=0
-                self.x3_temp = np.empty((myTotnumOfElements, *([self.nd] * 3)), dtype=np.complex128)
+                self.x3_temp = np.empty(
+                    (myTotnumOfElements, *([self.nd] * 3)), dtype=np.complex128
+                )
                 self.x3_temp = x3_temp
-                # self.x3_temp[mymatrices_removeIndices]=0
-                self.x4_temp = np.empty((myTotnumOfElements, *([self.nd] * 4)), dtype=np.complex128)
+                self.x4_temp = np.empty(
+                    (myTotnumOfElements, *([self.nd] * 4)), dtype=np.complex128
+                )
                 self.x4_temp = x4_temp
-                # self.x4_temp[mymatrices_removeIndices]=0
-                self.x5_temp = np.empty((myTotnumOfElements, *([self.nd] * 5)), dtype=np.complex128)
+                self.x5_temp = np.empty(
+                    (myTotnumOfElements, *([self.nd] * 5)), dtype=np.complex128
+                )
                 self.x5_temp = x5_temp
-                # self.x5_temp[mymatrices_removeIndices]=0
-                self.x6_temp = np.empty((myTotnumOfElements, *([self.nd] * 6)), dtype=np.complex128)
+                self.x6_temp = np.empty(
+                    (myTotnumOfElements, *([self.nd] * 6)), dtype=np.complex128
+                )
                 self.x6_temp = x6_temp
-                # self.x6_temp[mymatrices_removeIndices]=0
-            # end=time.time()
-            # print("Time to calculate all simple values on rank %d: %f"%(self.rank,end-start))
             if self.calculate_Gradient and not self.onlyX1X2:
                 # start=time.time()
-                x8_c1, x8_c2, x8_c3, x7_c1, x7_c2, x7_c1v, x7_c2v, x7_c3v, x7_c3, x7_c4 = get_x7_x8_contraction_allij(
-                    mymu, mymatrices, myovlp
+                x8_c1, x8_c2, x8_c3, x7_c1, x7_c2, x7_c1v, x7_c2v, x7_c3v, x7_c3, x7_c4 = (
+                    get_x7_x8_contraction_allij(mymu, mymatrices, myovlp)
                 )
                 self.x8_c1_temp = x8_c1
                 self.x8_c2_temp = x8_c2
@@ -195,7 +206,9 @@ class WF:
             )
             # Sum all Hamiltonian matrix elements across all processes
             # start=time.time()
-            self.comm.Allreduce(MPI.IN_PLACE, [big_array, MPI.COMPLEX16], op=MPI.SUM)  # I might not have to do this :)
+            self.comm.Allreduce(
+                MPI.IN_PLACE, [big_array, MPI.COMPLEX16], op=MPI.SUM
+            )  # I might not have to do this :)
             # Unpack the big array into the individual Hamiltonian matrix elements
             offset = 0
             length = np.prod(self.kinetic.shape)
@@ -208,17 +221,27 @@ class WF:
                 self.H,
                 self.Hsquared,
             ):
-                original_array[:] = big_array[offset : offset + length].reshape(original_array.shape)
+                original_array[:] = big_array[offset : offset + length].reshape(
+                    original_array.shape
+                )
                 offset += length
             self.mykinetic = self.kinetic[self.myrow_indices, self.mycol_indices]
             self.mypotential = self.potential[self.myrow_indices, self.mycol_indices]
-            self.mypotential_squared = self.potential_squared[self.myrow_indices, self.mycol_indices]
-            self.mykinetic_energy_squared = self.kinetic_energy_squared[self.myrow_indices, self.mycol_indices]
-            self.mypotential_times_kinetic = self.potential_times_kinetic[self.myrow_indices, self.mycol_indices]
+            self.mypotential_squared = self.potential_squared[
+                self.myrow_indices, self.mycol_indices
+            ]
+            self.mykinetic_energy_squared = self.kinetic_energy_squared[
+                self.myrow_indices, self.mycol_indices
+            ]
+            self.mypotential_times_kinetic = self.potential_times_kinetic[
+                self.myrow_indices, self.mycol_indices
+            ]
             self.myH = self.H[self.myrow_indices, self.mycol_indices]
             self.myHsquared = self.Hsquared[self.myrow_indices, self.mycol_indices]
 
-    def update_overlap_and_overlap_derivs(self, indices_new, new_nonlin_params, new_lin_params=None):
+    def update_overlap_and_overlap_derivs(
+        self, indices_new, new_nonlin_params, new_lin_params=None
+    ):
 
         ng = self.num_gaussians
         nd = self.num_dimensions
@@ -227,8 +250,6 @@ class WF:
         # The new_nonlin_params are the new non-linear parameters.
         # The new_lin_params are the new linear parameters.
         # If new_lin_params is None, the old linear parameters are used (or this might simply not be required)
-        # print(indices_new) # The last indices to update
-        # print(new_nonlin_params.shape) #For example (15,28) - only the WF of interest, not everything else.
         full_indices = np.arange(self.num_gaussians)
         seen_pairs = set()
         indices_to_update = []
@@ -259,7 +280,9 @@ class WF:
             self.matrices, indices_to_update, self.sum_matrices, self.sum_matrices_inv
         )  # This updates ALL sum matrices, not just the ones of this rank
 
-        mynew_overlap_matrix = self.calculate_myoverlapmatrix(self.mynewrow_indices, self.mynewcol_indices)
+        mynew_overlap_matrix = self.calculate_myoverlapmatrix(
+            self.mynewrow_indices, self.mynewcol_indices
+        )
         self.comm.Allreduce(MPI.IN_PLACE, [mynew_overlap_matrix, MPI.COMPLEX16], op=MPI.SUM)
         self.overlap[np.ix_(np.array(indices_new), np.array(full_indices))] = 0
         self.overlap[np.ix_(np.array(full_indices), np.array(indices_new))] = 0
@@ -269,7 +292,9 @@ class WF:
         selected_vectors = self.vectors[full_indices]
         selected_matrices = self.matrices[full_indices]
         prods = np.einsum("ij,ijk->ik", selected_vectors, selected_matrices)
-        mycross_mat_inv_list = self.sum_matrices_inv[self.mynewrow_indices, self.mynewcol_indices]
+        mycross_mat_inv_list = self.sum_matrices_inv[
+            self.mynewrow_indices, self.mynewcol_indices
+        ]
         bvecs_list = prods[self.mynewcol_indices] + np.conjugate(prods[self.mynewrow_indices])
         mymu_list = np.einsum("ijk,ik->ij", mycross_mat_inv_list, bvecs_list)
         # Next step: From the new sum matrices, calculate the new overlap matrix and the new overlap matrix derivatives
@@ -311,7 +336,9 @@ class WF:
         self.IabLj = np.zeros(
             (ng, nd, nd, nd, nd), dtype=np.complex128
         )  # Here, self.IabLj[j,a,b,:,:] #Gives me the IabLj matrix for a given j, a, b
-        self.Kab = np.zeros((ng, nd, nd, nd, nd))  # Here, self.Kab[j,a,b,:,:] #Gives me the Kab matrix for a given a,b
+        self.Kab = np.zeros(
+            (ng, nd, nd, nd, nd)
+        )  # Here, self.Kab[j,a,b,:,:] #Gives me the Kab matrix for a given a,b
 
         for a in range(nd):
             for b in range(a + 1):
@@ -320,8 +347,12 @@ class WF:
         self.Kab += +np.swapaxes(self.Kab, -1, -2)
         mytril_indices = np.tril_indices(nd)
         for i in range(ng):
-            self.L_matrices[i, :, :][mytril_indices] = self.nonlin_params[i][: int(0.5 * nd * (nd + 1))]
-            self.K_matrices[i, :, :][mytril_indices] = self.nonlin_params[i][int(0.5 * nd * (nd + 1)) : (nd * (nd + 1))]
+            self.L_matrices[i, :, :][mytril_indices] = self.nonlin_params[i][
+                : int(0.5 * nd * (nd + 1))
+            ]
+            self.K_matrices[i, :, :][mytril_indices] = self.nonlin_params[i][
+                int(0.5 * nd * (nd + 1)) : (nd * (nd + 1))
+            ]
         self.vectors = (
             self.nonlin_params[:, (nd * (nd + 1)) : (nd * (nd + 1)) + nd]
             + 1j * self.nonlin_params[:, nd * (nd + 1) + nd :]
@@ -374,12 +405,16 @@ class WF:
         self.update = True
         nd = self.num_dimensions
         ng_full = self.num_gaussians
-        ng_new = ind_max - ind_min + 1  # The number of new Gaussians. The +1 is because the range is inclusive.
+        ng_new = (
+            ind_max - ind_min + 1
+        )  # The number of new Gaussians. The +1 is because the range is inclusive.
         new_indices = np.arange(ind_min, ind_max + 1)
         mytril_indices = np.tril_indices(nd)
         # Update L and K matrices at the new indices
         for i in range(ng_new):
-            self.L_matrices[ind_min + i, :, :][mytril_indices] = new_nonlin_params[i][: int(0.5 * nd * (nd + 1))]
+            self.L_matrices[ind_min + i, :, :][mytril_indices] = new_nonlin_params[i][
+                : int(0.5 * nd * (nd + 1))
+            ]
             self.K_matrices[ind_min + i, :, :][mytril_indices] = new_nonlin_params[i][
                 int(0.5 * nd * (nd + 1)) : (nd * (nd + 1))
             ]
@@ -388,15 +423,22 @@ class WF:
             + 1j * new_nonlin_params[:, nd * (nd + 1) + nd :]
         )
         self.matrices[ind_min : ind_max + 1] = einsum(
-            "ijk,ilk->ijl", self.L_matrices[ind_min : ind_max + 1], self.L_matrices[ind_min : ind_max + 1]
+            "ijk,ilk->ijl",
+            self.L_matrices[ind_min : ind_max + 1],
+            self.L_matrices[ind_min : ind_max + 1],
         )
         self.matrices[ind_min : ind_max + 1] += 1j * (
-            self.K_matrices[ind_min : ind_max + 1] + einsum("ijk->ikj", self.K_matrices[ind_min : ind_max + 1])
+            self.K_matrices[ind_min : ind_max + 1]
+            + einsum("ijk->ikj", self.K_matrices[ind_min : ind_max + 1])
         )
         self.matrices_squared[ind_min : ind_max + 1] = einsum(
-            "ikx,ixl->ikl", self.matrices[ind_min : ind_max + 1], self.matrices[ind_min : ind_max + 1]
+            "ikx,ixl->ikl",
+            self.matrices[ind_min : ind_max + 1],
+            self.matrices[ind_min : ind_max + 1],
         )
-        self.matrices_squared_conj[ind_min : ind_max + 1] = conj(self.matrices_squared[ind_min : ind_max + 1])
+        self.matrices_squared_conj[ind_min : ind_max + 1] = conj(
+            self.matrices_squared[ind_min : ind_max + 1]
+        )
         self.vmmips[ind_min : ind_max + 1] = einsum(
             "ia,iab,ib->i",
             self.vectors[ind_min : ind_max + 1],
@@ -404,28 +446,41 @@ class WF:
             self.vectors[ind_min : ind_max + 1],
         )
         self.cjs[ind_min : ind_max + 1] = (
-            einsum("jii->j", self.matrices[ind_min : ind_max + 1]) - 2 * self.vmmips[ind_min : ind_max + 1]
+            einsum("jii->j", self.matrices[ind_min : ind_max + 1])
+            - 2 * self.vmmips[ind_min : ind_max + 1]
         )
         self.cis[ind_min : ind_max + 1] = np.conj(self.cjs[ind_min : ind_max + 1])
         self.omega_T[ind_min : ind_max + 1] = einsum(
-            "ik,ikl->il", self.vectors[ind_min : ind_max + 1], self.matrices_squared[ind_min : ind_max + 1]
+            "ik,ikl->il",
+            self.vectors[ind_min : ind_max + 1],
+            self.matrices_squared[ind_min : ind_max + 1],
         )
         self.rho_T_conjs[ind_min : ind_max + 1] = conj(self.omega_T[ind_min : ind_max + 1])
-        self.IabLj[ind_min : ind_max + 1] = einsum("abkl,jml->jabkm", self.Iab, self.L_matrices[ind_min : ind_max + 1])
+        self.IabLj[ind_min : ind_max + 1] = einsum(
+            "abkl,jml->jabkm", self.Iab, self.L_matrices[ind_min : ind_max + 1]
+        )
         self.IabLj[ind_min : ind_max + 1] = self.IabLj[ind_min : ind_max + 1] + np.swapaxes(
             self.IabLj[ind_min : ind_max + 1], -1, -2
         )
         self.Kabmuj[ind_min : ind_max + 1] = einsum(
-            "jablk,jk->jabl", self.Kab[ind_min : ind_max + 1], self.vectors[ind_min : ind_max + 1]
+            "jablk,jk->jabl",
+            self.Kab[ind_min : ind_max + 1],
+            self.vectors[ind_min : ind_max + 1],
         )
         self.IabLjmuj[ind_min : ind_max + 1] = einsum(
-            "jablk,jk->jabl", self.IabLj[ind_min : ind_max + 1], self.vectors[ind_min : ind_max + 1]
+            "jablk,jk->jabl",
+            self.IabLj[ind_min : ind_max + 1],
+            self.vectors[ind_min : ind_max + 1],
         )
         self.mKm[ind_min : ind_max + 1] = einsum(
-            "jk,jabk->jab", self.vectors[ind_min : ind_max + 1], self.Kabmuj[ind_min : ind_max + 1]
+            "jk,jabk->jab",
+            self.vectors[ind_min : ind_max + 1],
+            self.Kabmuj[ind_min : ind_max + 1],
         )
         self.mLm[ind_min : ind_max + 1] = einsum(
-            "jk,jabk->jab", self.vectors[ind_min : ind_max + 1], self.IabLjmuj[ind_min : ind_max + 1]
+            "jk,jabk->jab",
+            self.vectors[ind_min : ind_max + 1],
+            self.IabLjmuj[ind_min : ind_max + 1],
         )
         # I think those are relatively cheap to calculate up to here.
 
@@ -457,8 +512,12 @@ class WF:
             self.myvals.append(i * mynum)
         self.myvals.append(ng * (ng + 1) // 2 + 1)
         myvals = self.myvals
-        self.ij_zero_indices = []  # The indices at which matrix elements are not calculated, i.e. are set to zero
-        self.ij_indices = []  # The indices at which matrix elements are calculated, i.e. are not zero
+        self.ij_zero_indices = (
+            []
+        )  # The indices at which matrix elements are not calculated, i.e. are set to zero
+        self.ij_indices = (
+            []
+        )  # The indices at which matrix elements are calculated, i.e. are not zero
         counter = 0
         for i in range(self.num_gaussians):
             for j in range(0, i + 1):
@@ -478,10 +537,7 @@ class WF:
         self.matrices_j_squared_of_interest = []
         self.matrices_i_squared_of_interest = []
         self.ci_of_interest = []
-        # self.IabLj_of_interest=[]
         self.IabLjmuj_of_interest = []
-        # self.Kabmuj_of_interest=[]
-        # self.Kab_of_interest=[ ]
         for i, j in self.ij_indices:
             self.j_linear_of_interest.append(j_linear[j, :])
             self.cj_of_interest.append(self.cjs[j])
@@ -491,15 +547,7 @@ class WF:
             self.rho_T_conj_of_interest.append(np.conj(self.omega_T[i, :]))
             self.matrices_j_squared_of_interest.append(self.matrices_squared[j, :, :])
             self.matrices_i_squared_of_interest.append(np.conj(self.matrices_squared[i, :, :]))
-            # self.IabLj_of_interest.append(self.IabLj_list[:,j])
-            # self.IabLjmuj_of_interest.append(self.IabLjmuj_list[:,j])
-            # self.Kabmuj_of_interest.append(self.Kabmuj_list[:,j])
-            # self.Kab_of_interest.append(self.Kab_list[:,j])
             counter += 1
-        # self.Kab_of_interest=np.array(self.Kab_of_interest).transpose([1,0,2,3])
-        # self.Kabmuj_of_interest=np.array(self.Kabmuj_of_interest).transpose([1,0,2])
-        # self.IabLj_of_interest=np.array(self.IabLj_of_interest).transpose([1,0,2,3])
-        # self.IabLjmuj_of_interest=np.array(self.IabLjmuj_of_interest).transpose([1,0,2])
 
         self.myrow_indices = np.array(self.ij_indices)[:, 0]  # Extract row indices
         self.mycol_indices = np.array(self.ij_indices)[:, 1]  # Extract column indices
@@ -529,7 +577,9 @@ class WF:
                         D_tensor[i, counter] += -1 / L[a, a]
                     D_tensor[i, counter] += 2 * q.T @ (-BAinv @ Aderiv @ AinvB + Aderiv) @ q
                     Bderiv = real(self.Kab[i, a, b])
-                    D_tensor[i, counter + (nd * (nd + 1)) // 2] = 2 * q.T @ (BAinv @ Bderiv + Bderiv @ AinvB) @ q
+                    D_tensor[i, counter + (nd * (nd + 1)) // 2] = (
+                        2 * q.T @ (BAinv @ Bderiv + Bderiv @ AinvB) @ q
+                    )
                     counter += 1
             D_tensor[i, nd * (nd + 2) :] = 4 * (BAinv @ B + A) @ q
         return D_tensor
@@ -557,7 +607,9 @@ class WF:
                         D_tensor[i, counter] += -1 / L[a, a]
                     D_tensor[i, counter] += 2 * q.T @ (-BAinv @ Aderiv @ AinvB + Aderiv) @ q
                     Bderiv = real(self.Kab[update_indices[i], a, b])
-                    D_tensor[i, counter + (nd * (nd + 1)) // 2] = 2 * q.T @ (BAinv @ Bderiv + Bderiv @ AinvB) @ q
+                    D_tensor[i, counter + (nd * (nd + 1)) // 2] = (
+                        2 * q.T @ (BAinv @ Bderiv + Bderiv @ AinvB) @ q
+                    )
                     counter += 1
             D_tensor[i, nd * (nd + 2) :] = 4 * (BAinv @ B + A) @ q
         self.fodmd[update_indices] = D_tensor
@@ -566,9 +618,13 @@ class WF:
         bvecs_list = einsum("ak,akl->al", self.vectors, self.matrices)
         bvec_calc = 2 * np.real(bvecs_list)
         vmips = einsum("ia,iab,ib->i", self.vectors, self.matrices, self.vectors)
-        diagonal_sum_matrices_inv = np.diagonal(self.sum_matrices_inv, axis1=0, axis2=1).transpose([2, 0, 1])
+        diagonal_sum_matrices_inv = np.diagonal(
+            self.sum_matrices_inv, axis1=0, axis2=1
+        ).transpose([2, 0, 1])
         diagonal_exponents = (
-            einsum("ak,akl,al->a", bvec_calc, diagonal_sum_matrices_inv, bvec_calc) - vmips - vmips.conj()
+            einsum("ak,akl,al->a", bvec_calc, diagonal_sum_matrices_inv, bvec_calc)
+            - vmips
+            - vmips.conj()
         )
         diagonal_sum_matrix = np.diagonal(self.sum_matrices, axis1=0, axis2=1).transpose(
             [2, 0, 1]
@@ -578,18 +634,26 @@ class WF:
 
     def calculate_myoverlapmatrix(self, row_indices, col_indices):
 
-        bvecs_list, vmips, diagonal_determinants, diagonal_exponents = self.calculate_overlap_matrix_diagonals()
+        bvecs_list, vmips, diagonal_determinants, diagonal_exponents = (
+            self.calculate_overlap_matrix_diagonals()
+        )
         bvec_outer = np.conj(bvecs_list)[:, np.newaxis, :] + (bvecs_list)[np.newaxis, :, :]
         vmips_outer = np.conj(vmips[:, np.newaxis]) + vmips[np.newaxis, :]
-        diagonal_exponents_outer = diagonal_exponents[:, np.newaxis] + diagonal_exponents[np.newaxis, :]
+        diagonal_exponents_outer = (
+            diagonal_exponents[:, np.newaxis] + diagonal_exponents[np.newaxis, :]
+        )
         mybvecouter = bvec_outer[row_indices, col_indices, :]
         myvmipsouter = vmips_outer[row_indices, col_indices]
         mydiagonalexponentsouter = diagonal_exponents_outer[row_indices, col_indices]
         mysummatricesinv = self.sum_matrices_inv[row_indices, col_indices, :, :]
-        mysqrt_eigvals_inv = sqrt(eigvals(mysummatricesinv))  # Principal square root of eigenvalues
+        mysqrt_eigvals_inv = sqrt(
+            eigvals(mysummatricesinv)
+        )  # Principal square root of eigenvalues
         myinv_dets = np.prod(mysqrt_eigvals_inv, axis=1)
         mysqrt_diagonal_dets = sqrt(diagonal_determinants)
-        mydiagonal_dets_prod = einsum("i,j->ij", mysqrt_diagonal_dets, mysqrt_diagonal_dets)[row_indices, col_indices]
+        mydiagonal_dets_prod = einsum("i,j->ij", mysqrt_diagonal_dets, mysqrt_diagonal_dets)[
+            row_indices, col_indices
+        ]
         myoverlap = einsum("x,x->x", myinv_dets, mydiagonal_dets_prod)
         myexponents = (
             einsum("xa,xab,xb->x", mybvecouter, mysummatricesinv, mybvecouter)
@@ -605,8 +669,12 @@ class WF:
 
     def calculate_overlap_matrix(self):
         """This is from a *very old* version of the program"""
-        self.overlap_matrix = np.empty((self.num_gaussians, self.num_gaussians), dtype=np.complex128)
-        vmips = np.empty((self.num_gaussians), dtype=np.complex128)  # VMIP stands for "vector matrix inner product"
+        self.overlap_matrix = np.empty(
+            (self.num_gaussians, self.num_gaussians), dtype=np.complex128
+        )
+        vmips = np.empty(
+            (self.num_gaussians), dtype=np.complex128
+        )  # VMIP stands for "vector matrix inner product"
         for i in range(self.num_gaussians):
             vmips[i] = self.vectors[i].T @ self.matrices[i] @ self.vectors[i]
         for i in range(self.num_gaussians):
@@ -616,7 +684,9 @@ class WF:
                 squareroot = np.asarray(sqrtm(sum_matrix), dtype=np.complex128)
                 determinant = det(squareroot)
                 self.overlap_matrix[i, j] = 1 / determinant
-                bvec = self.vectors[j].T @ self.matrices[j] + np.conj(self.vectors[i].T @ self.matrices[i])
+                bvec = self.vectors[j].T @ self.matrices[j] + np.conj(
+                    self.vectors[i].T @ self.matrices[i]
+                )
                 exponent = +bvec.T @ sum_matrix_inv @ bvec - vmips[j] - np.conj(vmips[i])
                 # print(exponent)
                 self.overlap_matrix[i, j] *= np.exp(exponent)
@@ -721,45 +791,57 @@ class WF:
             ovlp = np.conj(self.myovlp[indices]) if conj else self.myovlp[indices]
             temp = -einsum("xkl,cxkl->xc", x2, mat[:, j_values, :, :])
             temp += 2 * einsum("xk,cxk->xc", x1, matmuj[:, j_values])
-            temp += -einsum("x,xk,cxk->xc", ovlp, self.vectors[j_values, :], matmuj[:, j_values])
+            temp += -einsum(
+                "x,xk,cxk->xc", ovlp, self.vectors[j_values, :], matmuj[:, j_values]
+            )
             return temp
 
         def calculate_mu_derivs(indices, j_values, conj):
             ovlp = np.conj(self.myovlp[indices]) if conj else self.myovlp[indices]
             x1 = np.conj(x1_temp[indices]) if conj else x1_temp[indices]
-            temp = -2 * einsum("xck,xk,x->xc", self.matrices[j_values, :, :], self.vectors[j_values, :], ovlp)
+            temp = -2 * einsum(
+                "xck,xk,x->xc", self.matrices[j_values, :, :], self.vectors[j_values, :], ovlp
+            )
             temp += 2 * einsum("xck,xk->xc", self.matrices[j_values, :, :], x1)
             return temp
 
         D_tensor = np.zeros((ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128)
 
         if ic.size > 0:
-            # I am not sure why "-ngMs" fixes this bug, but it does. In the future, I should probably fix this.
             D_tensor[ivc, indices_j_vc - ngMs, : self.ab_iter] = calculate_LK_derivs(
                 ic, jvc, self.IabLj_list, self.IabLjmuj_list, conj=True
             )
-            D_tensor[ivc, indices_j_vc - ngMs, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                ic, jvc, self.Kab_list, self.Kabmuj_list, conj=True
+            D_tensor[ivc, indices_j_vc - ngMs, self.ab_iter : 2 * self.ab_iter] = (
+                1j * calculate_LK_derivs(ic, jvc, self.Kab_list, self.Kabmuj_list, conj=True)
             )
-            D_tensor[ivc, indices_j_vc - ngMs, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(ic, jvc, conj=True)
+            D_tensor[ivc, indices_j_vc - ngMs, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(ic, jvc, conj=True)
+            )
 
         if inc.size > 0:
             D_tensor[ivnc, indices_j_vnc - ngMs, : self.ab_iter] = calculate_LK_derivs(
                 inc, jvnc, self.IabLj_list, self.IabLjmuj_list, conj=False
             )
-            D_tensor[ivnc, indices_j_vnc - ngMs, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                inc, jvnc, self.Kab_list, self.Kabmuj_list, conj=False
+            D_tensor[ivnc, indices_j_vnc - ngMs, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(inc, jvnc, self.Kab_list, self.Kabmuj_list, conj=False)
             )
-            D_tensor[ivnc, indices_j_vnc - ngMs, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                inc, jvnc, conj=False
+            D_tensor[ivnc, indices_j_vnc - ngMs, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(inc, jvnc, conj=False)
             )
-        D_tensor[:, :, nd * (nd + 2) : nd * (nd + 3)] = 1j * D_tensor[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        D_tensor[:, :, nd * (nd + 2) : nd * (nd + 3)] = (
+            1j * D_tensor[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        )
         D_tensor_full = np.zeros_like(D_tensor)
-        self.comm.Reduce([D_tensor, MPI.COMPLEX16], [D_tensor_full, MPI.COMPLEX16], op=MPI.SUM, root=0)
+        self.comm.Reduce(
+            [D_tensor, MPI.COMPLEX16], [D_tensor_full, MPI.COMPLEX16], op=MPI.SUM, root=0
+        )
         if self.rank == 0:
             fodmd = self.fodmd
 
-            D_tensor_full += -0.5 * einsum("ij,jk->ijk", self.overlap[:, ngMs:], fodmd[ngMs:, :])
+            D_tensor_full += -0.5 * einsum(
+                "ij,jk->ijk", self.overlap[:, ngMs:], fodmd[ngMs:, :]
+            )
 
         return D_tensor_full
 
@@ -817,7 +899,9 @@ class WF:
             x4_contr = einsum("xlkkk->xl", -self.lambda_ / 3 * 2 * x4[:, :, 1:, 1:, 1:])
             x4_contr += einsum("xlkkk->xl", 2 * self.lambda_ * x4[:, :, 0:-1, 0:-1, 1:])
             x3 = np.conj(self.x3_temp[indices]) if conj else self.x3_temp[indices]
-            potential = np.conj(self.mypotential[indices]) if conj else self.mypotential[indices]
+            potential = (
+                np.conj(self.mypotential[indices]) if conj else self.mypotential[indices]
+            )
             mymatrices = self.matrices[j_values]
             myvec = self.vectors[j_values, :]
             temp = einsum("xak,xkll->xa", mymatrices, x3)
@@ -826,18 +910,20 @@ class WF:
 
             return temp
 
-        D_tensor_alt = np.zeros((ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128)
+        D_tensor_alt = np.zeros(
+            (ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128
+        )
         if ic.size > 0:
             conj = True
             C1, C2 = calculate_temp_mats(ic, jvc, ivc, conj=conj)
             D_tensor_alt[ivc, indices_j_vc, : self.ab_iter] = calculate_LK_derivs(
                 ic, jvc, ivc, self.IabLj_list, self.IabLjmuj_list, C1, C2
             )
-            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                ic, jvc, ivc, self.Kab_list, self.Kabmuj_list, C1, C2
+            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = (
+                1j * calculate_LK_derivs(ic, jvc, ivc, self.Kab_list, self.Kabmuj_list, C1, C2)
             )
-            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                ic, jvc, ivc, conj=conj
+            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(ic, jvc, ivc, conj=conj)
             )
 
         if inc.size > 0:
@@ -846,13 +932,16 @@ class WF:
             D_tensor_alt[ivnc, indices_j_vnc, : self.ab_iter] = calculate_LK_derivs(
                 inc, jvnc, ivnc, self.IabLj_list, self.IabLjmuj_list, C1, C2
             )
-            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                inc, jvnc, ivnc, self.Kab_list, self.Kabmuj_list, C1, C2
+            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(inc, jvnc, ivnc, self.Kab_list, self.Kabmuj_list, C1, C2)
             )
-            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                inc, jvnc, ivnc, conj=conj
+            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(inc, jvnc, ivnc, conj=conj)
             )
-        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = 1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = (
+            1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        )
 
         return D_tensor_alt
 
@@ -861,7 +950,9 @@ class WF:
         counter = 0
         kinetic_temp = einsum("x,x->x", self.cj_of_interest, self.myovlp)
         kinetic_temp += einsum("xk,xk->x", self.j_linear_of_interest, self.x1_temp)
-        kinetic_temp += -2 * einsum("xab,xab->x", self.x2_temp, self.matrices_squared_of_interest)
+        kinetic_temp += -2 * einsum(
+            "xab,xab->x", self.x2_temp, self.matrices_squared_of_interest
+        )
         self.kinetic[self.myrow_indices, self.mycol_indices] = kinetic_temp
         self.kinetic[self.mycol_indices, self.myrow_indices] = np.conj(kinetic_temp)
         return self.kinetic
@@ -910,7 +1001,9 @@ class WF:
             return C1, C2
 
         def calculate_LK_derivs(indices, j_values, i_values, mat, matmuj, C1, C2):
-            return einsum("xnm,cxnm->xc", C2, mat[:, j_values, :, :]) + einsum("xn,cxn->xc", C1, matmuj[:, j_values])
+            return einsum("xnm,cxnm->xc", C2, mat[:, j_values, :, :]) + einsum(
+                "xn,cxn->xc", C1, matmuj[:, j_values]
+            )
 
         def calculate_mu_derivs(indices, j_values, i_values, conj):
             x3 = np.conj(self.x3_temp[indices]) if conj else self.x3_temp[indices]
@@ -934,10 +1027,12 @@ class WF:
             D_tensor[ivc, indices_j_vc, : self.ab_iter] = calculate_LK_derivs(
                 ic, jvc, ivc, self.IabLj_list, self.IabLjmuj_list, C1, C2
             )
-            D_tensor[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                ic, jvc, ivc, self.Kab_list, self.Kabmuj_list, C1, C2
+            D_tensor[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = (
+                1j * calculate_LK_derivs(ic, jvc, ivc, self.Kab_list, self.Kabmuj_list, C1, C2)
             )
-            D_tensor[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(ic, jvc, ivc, conj=conj)
+            D_tensor[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
+                ic, jvc, ivc, conj=conj
+            )
 
         if inc.size > 0:
             conj = False
@@ -945,42 +1040,70 @@ class WF:
             D_tensor[ivnc, indices_j_vnc, : self.ab_iter] = calculate_LK_derivs(
                 inc, jvnc, ivnc, self.IabLj_list, self.IabLjmuj_list, C1, C2
             )
-            D_tensor[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                inc, jvnc, ivnc, self.Kab_list, self.Kabmuj_list, C1, C2
+            D_tensor[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(inc, jvnc, ivnc, self.Kab_list, self.Kabmuj_list, C1, C2)
             )
             D_tensor[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
                 inc, jvnc, ivnc, conj=conj
             )
-        D_tensor[:, :, nd * (nd + 2) : nd * (nd + 3)] = 1j * D_tensor[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        D_tensor[:, :, nd * (nd + 2) : nd * (nd + 3)] = (
+            1j * D_tensor[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        )
         return D_tensor
 
     def calculate_kinetic_energy_squared(self):
         self.kinetic_energy_squared = np.zeros_like(self.overlap)
         kinetic_squared_temp = -2 * einsum(
-            "x,xkl,xkl->x", self.ci_of_interest, self.matrices_j_squared_of_interest, self.x2_temp
+            "x,xkl,xkl->x",
+            self.ci_of_interest,
+            self.matrices_j_squared_of_interest,
+            self.x2_temp,
         )
         kinetic_squared_temp += -2 * einsum(
-            "x,xkl,xkl->x", self.cj_of_interest, self.matrices_i_squared_of_interest, self.x2_temp
+            "x,xkl,xkl->x",
+            self.cj_of_interest,
+            self.matrices_i_squared_of_interest,
+            self.x2_temp,
         )
         kinetic_squared_temp += 16 * einsum(
             "xk,xl,xkl->x", self.rho_T_conj_of_interest, self.omega_T_of_interest, self.x2_temp
         )
-        kinetic_squared_temp += 4 * einsum("x,xl,xl->x", self.ci_of_interest, self.omega_T_of_interest, self.x1_temp)
-        kinetic_squared_temp += 4 * einsum("x,xl,xl->x", self.cj_of_interest, self.rho_T_conj_of_interest, self.x1_temp)
-
-        kinetic_squared_temp += -8 * einsum(
-            "xk,xlm,xklm->x", self.omega_T_of_interest, self.matrices_i_squared_of_interest, self.x3_temp
-        )
-        kinetic_squared_temp += -8 * einsum(
-            "xk,xlm,xklm->x", self.rho_T_conj_of_interest, self.matrices_j_squared_of_interest, self.x3_temp
-        )
-
-        kinetic_squared_temp += einsum("x,x,x->x", self.ci_of_interest, self.cj_of_interest, self.myovlp)
         kinetic_squared_temp += 4 * einsum(
-            "xkl,xmn,xklmn->x", self.matrices_i_squared_of_interest, self.matrices_j_squared_of_interest, self.x4_temp
+            "x,xl,xl->x", self.ci_of_interest, self.omega_T_of_interest, self.x1_temp
         )
-        self.kinetic_energy_squared[self.myrow_indices, self.mycol_indices] = kinetic_squared_temp
-        self.kinetic_energy_squared[self.mycol_indices, self.myrow_indices] = np.conj(kinetic_squared_temp)
+        kinetic_squared_temp += 4 * einsum(
+            "x,xl,xl->x", self.cj_of_interest, self.rho_T_conj_of_interest, self.x1_temp
+        )
+
+        kinetic_squared_temp += -8 * einsum(
+            "xk,xlm,xklm->x",
+            self.omega_T_of_interest,
+            self.matrices_i_squared_of_interest,
+            self.x3_temp,
+        )
+        kinetic_squared_temp += -8 * einsum(
+            "xk,xlm,xklm->x",
+            self.rho_T_conj_of_interest,
+            self.matrices_j_squared_of_interest,
+            self.x3_temp,
+        )
+
+        kinetic_squared_temp += einsum(
+            "x,x,x->x", self.ci_of_interest, self.cj_of_interest, self.myovlp
+        )
+        kinetic_squared_temp += 4 * einsum(
+            "xkl,xmn,xklmn->x",
+            self.matrices_i_squared_of_interest,
+            self.matrices_j_squared_of_interest,
+            self.x4_temp,
+        )
+        self.kinetic_energy_squared[self.myrow_indices, self.mycol_indices] = (
+            kinetic_squared_temp
+        )
+        self.kinetic_energy_squared[self.mycol_indices, self.myrow_indices] = np.conj(
+            kinetic_squared_temp
+        )
 
         return self.kinetic_energy_squared
 
@@ -1026,7 +1149,9 @@ class WF:
                 + x6_e_contracted_secondV * (-2 / 3 * self.lambda_)
             )
             super_contr1 += (
-                2 / 9 * self.lambda_sq * x7_c1v + 2 * self.lambda_sq * x7_c2v + -4 / 3 * self.lambda_sq * x7_c3v
+                2 / 9 * self.lambda_sq * x7_c1v
+                + 2 * self.lambda_sq * x7_c2v
+                + -4 / 3 * self.lambda_sq * x7_c3v
             )
             super_contr2 = x6_e_contracted_full * (-0.25)
             super_contr2 += -self.lambda_ * x7_c1
@@ -1036,8 +1161,14 @@ class WF:
             super_contr2 += -self.lambda_sq * x8_c2
             return super_contr1, super_contr2
 
-        def calculate_LK_derivs(indices, j_values, i_values, mat, matmuj, super_contr1, super_contr2):
-            mypotsq = np.conj(self.mypotential_squared[indices]) if conj else self.mypotential_squared[indices]
+        def calculate_LK_derivs(
+            indices, j_values, i_values, mat, matmuj, super_contr1, super_contr2
+        ):
+            mypotsq = (
+                np.conj(self.mypotential_squared[indices])
+                if conj
+                else self.mypotential_squared[indices]
+            )
             myvec = self.vectors[j_values, :]
             retval = einsum("xnm,cxnm->xc", super_contr2, mat[:, j_values, :, :])
             retval += einsum("xn,cxn->xc", super_contr1, matmuj[:, j_values])
@@ -1059,16 +1190,24 @@ class WF:
                 + x6_e_contracted_secondV * (-2 / 3 * self.lambda_)
             )
             super_contr1 += (
-                2 / 9 * self.lambda_sq * x7_c1v + 2 * self.lambda_sq * x7_c2v + -4 / 3 * self.lambda_sq * x7_c3v
+                2 / 9 * self.lambda_sq * x7_c1v
+                + 2 * self.lambda_sq * x7_c2v
+                + -4 / 3 * self.lambda_sq * x7_c3v
             )
-            mypotsq = np.conj(self.mypotential_squared[indices]) if conj else self.mypotential_squared[indices]
+            mypotsq = (
+                np.conj(self.mypotential_squared[indices])
+                if conj
+                else self.mypotential_squared[indices]
+            )
             mymatrices = self.matrices[j_values]
             myvec = self.vectors[j_values, :]
             temp = einsum("xck,xk->xc", mymatrices, super_contr1)
             temp += -2 * einsum("x,xck,xk->xc", mypotsq, mymatrices, myvec)
             return temp
 
-        D_tensor_alt = np.zeros((ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128)
+        D_tensor_alt = np.zeros(
+            (ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128
+        )
 
         if ic.size > 0:
             conj = True
@@ -1076,11 +1215,11 @@ class WF:
             D_tensor_alt[ivc, indices_j_vc, : self.ab_iter] = calculate_LK_derivs(
                 ic, jvc, ivc, self.IabLj_list, self.IabLjmuj_list, C1, C2
             )
-            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                ic, jvc, ivc, self.Kab_list, self.Kabmuj_list, C1, C2
+            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = (
+                1j * calculate_LK_derivs(ic, jvc, ivc, self.Kab_list, self.Kabmuj_list, C1, C2)
             )
-            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                ic, jvc, ivc, conj=conj
+            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(ic, jvc, ivc, conj=conj)
             )
 
         if inc.size > 0:
@@ -1089,13 +1228,16 @@ class WF:
             D_tensor_alt[ivnc, indices_j_vnc, : self.ab_iter] = calculate_LK_derivs(
                 inc, jvnc, ivnc, self.IabLj_list, self.IabLjmuj_list, C1, C2
             )
-            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                inc, jvnc, ivnc, self.Kab_list, self.Kabmuj_list, C1, C2
+            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(inc, jvnc, ivnc, self.Kab_list, self.Kabmuj_list, C1, C2)
             )
-            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                inc, jvnc, ivnc, conj=conj
+            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(inc, jvnc, ivnc, conj=conj)
             )
-        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = 1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = (
+            1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        )
         return D_tensor_alt
 
     def calculate_full_kinetic_energy_squared_deriv(self, start_index_WFnew):
@@ -1104,7 +1246,6 @@ class WF:
         # n(n+3) parameters specifying the Gaussian.
         ng = self.num_gaussians
         nd = self.num_dimensions
-        ngMs = start_index_WFnew
         try:
             self.jvc
         except:
@@ -1211,7 +1352,16 @@ class WF:
             return temp1, temp2, temp3, temp4, temp5, temp6, temp7, temp8, temp9, temp10
 
         def calculate_LK_derivs(
-            indices, j_values, i_values, Asquaredderiv, cj_deriv, omega_deriv, mat, matmuj, const, temps
+            indices,
+            j_values,
+            i_values,
+            Asquaredderiv,
+            cj_deriv,
+            omega_deriv,
+            mat,
+            matmuj,
+            const,
+            temps,
         ):
 
             temp1, temp2, temp3, temp4, temp5, temp6 = temps[:6]
@@ -1227,7 +1377,9 @@ class WF:
         def calculate_mu_derivs(indices, j_values, i_values, temps):
             temp7, temp8, temp9, temp10 = temps
             zs = einsum("xak,xk->xa", self.matrices[j_values], self.vectors[j_values])
-            ck_derivs = einsum("xal,xl->xa", self.matrices_squared[j_values], self.vectors[j_values])
+            ck_derivs = einsum(
+                "xal,xl->xa", self.matrices_squared[j_values], self.vectors[j_values]
+            )
             vaAsquareds = self.matrices_squared[j_values]
             temp = einsum("x,xa->xa", temp7, zs)
 
@@ -1236,7 +1388,9 @@ class WF:
             temp += einsum("xk,xak->xa", temp10, vaAsquareds)
             return temp
 
-        D_tensor_alt = np.zeros((ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128)
+        D_tensor_alt = np.zeros(
+            (ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128
+        )
         mKm_list = []
         mLm_list = []
         self.ab_iter = 0
@@ -1253,9 +1407,13 @@ class WF:
         Asquared_derivs_K_list = einsum("cjkx,jxl->cjkl", self.Kab_list, self.matrices)
         Asquared_derivs_K_list += einsum("jkx,cjxl->cjkl", self.matrices, self.Kab_list)
         cj_derivs_I_list = einsum("cjkk->cj", self.IabLj_list, dtype=np.complex128)
-        cj_derivs_I_list += -2 * einsum("jk,cjkl,jl->cj", self.vectors, Asquared_derivs_I_list, self.vectors)
+        cj_derivs_I_list += -2 * einsum(
+            "jk,cjkl,jl->cj", self.vectors, Asquared_derivs_I_list, self.vectors
+        )
         cj_derivs_K_list = einsum("cjkk->cj", self.Kab_list, dtype=np.complex128)
-        cj_derivs_K_list += -2 * einsum("jk,cjkl,jl->cj", self.vectors, Asquared_derivs_K_list, self.vectors)
+        cj_derivs_K_list += -2 * einsum(
+            "jk,cjkl,jl->cj", self.vectors, Asquared_derivs_K_list, self.vectors
+        )
         omega_derivs_K_list = einsum("jk,cjkl->cjl", self.vectors, Asquared_derivs_K_list)
         omega_derivs_I_list = einsum("jk,cjkl->cjl", self.vectors, Asquared_derivs_I_list)
 
@@ -1274,20 +1432,23 @@ class WF:
                 mLm_list,
                 temps,
             )
-            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                ic,
-                jvc,
-                ivc,
-                Asquared_derivs_K_list,
-                cj_derivs_K_list,
-                omega_derivs_K_list,
-                self.Kab_list,
-                self.Kabmuj_list,
-                mKm_list,
-                temps,
+            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(
+                    ic,
+                    jvc,
+                    ivc,
+                    Asquared_derivs_K_list,
+                    cj_derivs_K_list,
+                    omega_derivs_K_list,
+                    self.Kab_list,
+                    self.Kabmuj_list,
+                    mKm_list,
+                    temps,
+                )
             )
-            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                ic, jvc, ivc, temps[6:]
+            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(ic, jvc, ivc, temps[6:])
             )
 
         if inc.size > 0:
@@ -1305,22 +1466,27 @@ class WF:
                 mLm_list,
                 temps,
             )
-            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                inc,
-                jvnc,
-                ivnc,
-                Asquared_derivs_K_list,
-                cj_derivs_K_list,
-                omega_derivs_K_list,
-                self.Kab_list,
-                self.Kabmuj_list,
-                mKm_list,
-                temps,
+            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(
+                    inc,
+                    jvnc,
+                    ivnc,
+                    Asquared_derivs_K_list,
+                    cj_derivs_K_list,
+                    omega_derivs_K_list,
+                    self.Kab_list,
+                    self.Kabmuj_list,
+                    mKm_list,
+                    temps,
+                )
             )
-            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                inc, jvnc, ivnc, temps[6:]
+            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(inc, jvnc, ivnc, temps[6:])
             )
-        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = 1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = (
+            1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        )
         return D_tensor_alt
 
     def calculate_potential_times_kinetic_energy(self):
@@ -1329,22 +1495,44 @@ class WF:
             2
             / 3
             * self.lambda_
-            * einsum("xmmmkl,xkl->x", self.x5_temp[:, 1:, 1:, 1:, :, :], self.matrices_squared_of_interest)
+            * einsum(
+                "xmmmkl,xkl->x",
+                self.x5_temp[:, 1:, 1:, 1:, :, :],
+                self.matrices_squared_of_interest,
+            )
         )
         potential_temp += (
             -2
             * self.lambda_
-            * einsum("xmmmkl,xkl->x", self.x5_temp[:, :-1, :-1, 1:, :, :], self.matrices_squared_of_interest)
+            * einsum(
+                "xmmmkl,xkl->x",
+                self.x5_temp[:, :-1, :-1, 1:, :, :],
+                self.matrices_squared_of_interest,
+            )
         )
         potential_temp += (
-            -4 / 3 * self.lambda_ * einsum("xklll,xk->x", self.x4_temp[:, :, 1:, 1:, 1:], self.omega_T_of_interest)
+            -4
+            / 3
+            * self.lambda_
+            * einsum("xklll,xk->x", self.x4_temp[:, :, 1:, 1:, 1:], self.omega_T_of_interest)
         )
         potential_temp += (
-            4 * self.lambda_ * einsum("xklll,xk->x", self.x4_temp[:, :, :-1, :-1, 1:], self.omega_T_of_interest)
+            4
+            * self.lambda_
+            * einsum("xklll,xk->x", self.x4_temp[:, :, :-1, :-1, 1:], self.omega_T_of_interest)
         )
-        potential_temp += -einsum("xklmm,xkl->x", self.x4_temp, self.matrices_squared_of_interest)
-        potential_temp += -1 / 3 * self.lambda_ * einsum("x,xkkk->x", self.cj_of_interest, self.x3_temp[:, 1:, 1:, 1:])
-        potential_temp += self.lambda_ * einsum("x,xkkk->x", self.cj_of_interest, self.x3_temp[:, 0:-1, 0:-1, 1:])
+        potential_temp += -einsum(
+            "xklmm,xkl->x", self.x4_temp, self.matrices_squared_of_interest
+        )
+        potential_temp += (
+            -1
+            / 3
+            * self.lambda_
+            * einsum("x,xkkk->x", self.cj_of_interest, self.x3_temp[:, 1:, 1:, 1:])
+        )
+        potential_temp += self.lambda_ * einsum(
+            "x,xkkk->x", self.cj_of_interest, self.x3_temp[:, 0:-1, 0:-1, 1:]
+        )
         potential_temp += 0.5 * einsum("x,xkk->x", self.cj_of_interest, self.x2_temp)
         potential_temp += 2 * einsum("xk,xkll->x", self.omega_T_of_interest, self.x3_temp)
 
@@ -1353,26 +1541,54 @@ class WF:
             2
             / 3
             * self.lambda_
-            * einsum("xmmmkl,xkl->x", self.x5_temp[:, 1:, 1:, 1:, :, :], self.matrices_i_squared_of_interest)
+            * einsum(
+                "xmmmkl,xkl->x",
+                self.x5_temp[:, 1:, 1:, 1:, :, :],
+                self.matrices_i_squared_of_interest,
+            )
         )
         potential_temp += (
             -2
             * self.lambda_
-            * einsum("xmmmkl,xkl->x", self.x5_temp[:, :-1, :-1, 1:, :, :], self.matrices_i_squared_of_interest)
+            * einsum(
+                "xmmmkl,xkl->x",
+                self.x5_temp[:, :-1, :-1, 1:, :, :],
+                self.matrices_i_squared_of_interest,
+            )
         )
         potential_temp += (
-            -4 / 3 * self.lambda_ * einsum("xklll,xk->x", self.x4_temp[:, :, 1:, 1:, 1:], self.rho_T_conj_of_interest)
+            -4
+            / 3
+            * self.lambda_
+            * einsum(
+                "xklll,xk->x", self.x4_temp[:, :, 1:, 1:, 1:], self.rho_T_conj_of_interest
+            )
         )
         potential_temp += (
-            4 * self.lambda_ * einsum("xklll,xk->x", self.x4_temp[:, :, :-1, :-1, 1:], self.rho_T_conj_of_interest)
+            4
+            * self.lambda_
+            * einsum(
+                "xklll,xk->x", self.x4_temp[:, :, :-1, :-1, 1:], self.rho_T_conj_of_interest
+            )
         )
-        potential_temp += -einsum("xklmm,xkl->x", self.x4_temp, self.matrices_i_squared_of_interest)
-        potential_temp += -1 / 3 * self.lambda_ * einsum("x,xkkk->x", self.ci_of_interest, self.x3_temp[:, 1:, 1:, 1:])
-        potential_temp += self.lambda_ * einsum("x,xkkk->x", self.ci_of_interest, self.x3_temp[:, 0:-1, 0:-1, 1:])
+        potential_temp += -einsum(
+            "xklmm,xkl->x", self.x4_temp, self.matrices_i_squared_of_interest
+        )
+        potential_temp += (
+            -1
+            / 3
+            * self.lambda_
+            * einsum("x,xkkk->x", self.ci_of_interest, self.x3_temp[:, 1:, 1:, 1:])
+        )
+        potential_temp += self.lambda_ * einsum(
+            "x,xkkk->x", self.ci_of_interest, self.x3_temp[:, 0:-1, 0:-1, 1:]
+        )
         potential_temp += 0.5 * einsum("x,xkk->x", self.ci_of_interest, self.x2_temp)
         potential_temp += 2 * einsum("xk,xkll->x", self.rho_T_conj_of_interest, self.x3_temp)
 
-        self.potential_times_kinetic[self.mycol_indices, self.myrow_indices] = np.conj(potential_temp)
+        self.potential_times_kinetic[self.mycol_indices, self.myrow_indices] = np.conj(
+            potential_temp
+        )
         self.potential_times_kinetic += np.conj(self.potential_times_kinetic).T
 
         return self.potential_times_kinetic
@@ -1400,8 +1616,12 @@ class WF:
             x2 = np.conj(self.x2_temp[indices]) if conj else self.x2_temp[indices]
             x3 = np.conj(self.x3_temp[indices]) if conj else self.x3_temp[indices]
             x4 = np.conj(self.x4_temp[indices]) if conj else self.x4_temp[indices]
-            x7_c3_temp = np.conj(self.x7_c3_temp[indices]) if conj else self.x7_c3_temp[indices]
-            x7_c4_temp = np.conj(self.x7_c4_temp[indices]) if conj else self.x7_c4_temp[indices]
+            x7_c3_temp = (
+                np.conj(self.x7_c3_temp[indices]) if conj else self.x7_c3_temp[indices]
+            )
+            x7_c4_temp = (
+                np.conj(self.x7_c4_temp[indices]) if conj else self.x7_c4_temp[indices]
+            )
             mycis = self.cis[i_values]
             mycjs = self.cjs[j_values]
             mymsc = self.matrices_squared_conj[i_values, :, :]
@@ -1436,11 +1656,19 @@ class WF:
             temp1 += -2 * einsum("xk,xkll->x", myomega, x3)
             temp1 += einsum("xmn,xmnkk->x", myms, x4)
             temp1 += einsum(
-                "x,x->x", mycis, -self.lambda_ * x3e_c1_mat + 1 / 3 * self.lambda_ * x3e_c2_mat - 0.5 * x2e_c_mat
+                "x,x->x",
+                mycis,
+                -self.lambda_ * x3e_c1_mat
+                + 1 / 3 * self.lambda_ * x3e_c2_mat
+                - 0.5 * x2e_c_mat,
             )
             temp1 += -einsum("x->x", 4 * self.lambda_ * x4e_c1_mat)
             temp1 += einsum(
-                "x,x->x", mycjs, +self.lambda_ * 1 / 3 * x3e_c2_mat - 0.5 * x2e_c_mat - self.lambda_ * x3e_c1_mat
+                "x,x->x",
+                mycjs,
+                +self.lambda_ * 1 / 3 * x3e_c2_mat
+                - 0.5 * x2e_c_mat
+                - self.lambda_ * x3e_c1_mat,
             )
             temp2 = einsum("x,xm->xm", mycis, temp_contr4)
             temp2 += einsum("x,xmkk->xm", mycis, x3)
@@ -1470,7 +1698,9 @@ class WF:
             temp4 += 2 * einsum("xkll->xk", x3)
             temp5 = 2 * temp_contr5
             temp5 += -einsum("xklmm->xkl", x4)
-            temp6 = self.lambda_ * x3e_c1_mat + 0.5 * x2e_c_mat - 1 / 3 * self.lambda_ * x3e_c2_mat
+            temp6 = (
+                self.lambda_ * x3e_c1_mat + 0.5 * x2e_c_mat - 1 / 3 * self.lambda_ * x3e_c2_mat
+            )
 
             temp7 = einsum("x,xfgg->xf", mycis, x3)
             temp7 += einsum("x,xf->xf", mycis, temp_contr4)
@@ -1499,11 +1729,22 @@ class WF:
             temp8 += -einsum("x,x->x", mycjs, x2e_c_mat)
             temp8 += -4 * einsum("xf,xfgg->x", myomega, x3)
             temp8 += +2 * einsum("xfg,xfgkk->x", myms, x4)
-            temp9 = self.lambda_ * x3e_c1_mat - self.lambda_ * 1 / 3 * x3e_c2_mat + 0.5 * x2e_c_mat
+            temp9 = (
+                self.lambda_ * x3e_c1_mat - self.lambda_ * 1 / 3 * x3e_c2_mat + 0.5 * x2e_c_mat
+            )
             return temp1, temp2, temp3, temp4, temp5, temp6, temp7, temp8, temp9, temp_contr4
 
         def calculate_LK_derivs(
-            indices, j_values, i_values, Asquaredderiv, cj_deriv, omega_deriv, mat, matmuj, const, temps
+            indices,
+            j_values,
+            i_values,
+            Asquaredderiv,
+            cj_deriv,
+            omega_deriv,
+            mat,
+            matmuj,
+            const,
+            temps,
         ):
 
             temp1, temp2, temp3, temp4, temp5, temp6 = temps[:6]
@@ -1534,7 +1775,9 @@ class WF:
 
             return temp
 
-        D_tensor_alt = np.zeros((ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128)
+        D_tensor_alt = np.zeros(
+            (ng, ng - start_index_WFnew, nd * (nd + 3)), dtype=np.complex128
+        )
         mKm_list = []
         mLm_list = []
         self.ab_iter = 0
@@ -1551,9 +1794,13 @@ class WF:
         Asquared_derivs_K_list = einsum("cjkx,jxl->cjkl", self.Kab_list, self.matrices)
         Asquared_derivs_K_list += einsum("jkx,cjxl->cjkl", self.matrices, self.Kab_list)
         cj_derivs_I_list = einsum("cjkk->cj", self.IabLj_list, dtype=np.complex128)
-        cj_derivs_I_list += -2 * einsum("jk,cjkl,jl->cj", self.vectors, Asquared_derivs_I_list, self.vectors)
+        cj_derivs_I_list += -2 * einsum(
+            "jk,cjkl,jl->cj", self.vectors, Asquared_derivs_I_list, self.vectors
+        )
         cj_derivs_K_list = einsum("cjkk->cj", self.Kab_list, dtype=np.complex128)
-        cj_derivs_K_list += -2 * einsum("jk,cjkl,jl->cj", self.vectors, Asquared_derivs_K_list, self.vectors)
+        cj_derivs_K_list += -2 * einsum(
+            "jk,cjkl,jl->cj", self.vectors, Asquared_derivs_K_list, self.vectors
+        )
         omega_derivs_K_list = einsum("jk,cjkl->cjl", self.vectors, Asquared_derivs_K_list)
         omega_derivs_I_list = einsum("jk,cjkl->cjl", self.vectors, Asquared_derivs_I_list)
 
@@ -1572,20 +1819,23 @@ class WF:
                 mLm_list,
                 temps,
             )
-            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                ic,
-                jvc,
-                ivc,
-                Asquared_derivs_K_list,
-                cj_derivs_K_list,
-                omega_derivs_K_list,
-                self.Kab_list,
-                self.Kabmuj_list,
-                mKm_list,
-                temps,
+            D_tensor_alt[ivc, indices_j_vc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(
+                    ic,
+                    jvc,
+                    ivc,
+                    Asquared_derivs_K_list,
+                    cj_derivs_K_list,
+                    omega_derivs_K_list,
+                    self.Kab_list,
+                    self.Kabmuj_list,
+                    mKm_list,
+                    temps,
+                )
             )
-            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                ic, jvc, ivc, temps[6:]
+            D_tensor_alt[ivc, indices_j_vc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(ic, jvc, ivc, temps[6:])
             )
 
         if inc.size > 0:
@@ -1603,36 +1853,56 @@ class WF:
                 mLm_list,
                 temps,
             )
-            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = 1j * calculate_LK_derivs(
-                inc,
-                jvnc,
-                ivnc,
-                Asquared_derivs_K_list,
-                cj_derivs_K_list,
-                omega_derivs_K_list,
-                self.Kab_list,
-                self.Kabmuj_list,
-                mKm_list,
-                temps,
+            D_tensor_alt[ivnc, indices_j_vnc, self.ab_iter : 2 * self.ab_iter] = (
+                1j
+                * calculate_LK_derivs(
+                    inc,
+                    jvnc,
+                    ivnc,
+                    Asquared_derivs_K_list,
+                    cj_derivs_K_list,
+                    omega_derivs_K_list,
+                    self.Kab_list,
+                    self.Kabmuj_list,
+                    mKm_list,
+                    temps,
+                )
             )
-            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = calculate_mu_derivs(
-                inc, jvnc, ivnc, temps[6:]
+            D_tensor_alt[ivnc, indices_j_vnc, nd * (nd + 1) : nd * (nd + 2)] = (
+                calculate_mu_derivs(inc, jvnc, ivnc, temps[6:])
             )
-        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = 1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        D_tensor_alt[:, :, nd * (nd + 2) : nd * (nd + 3)] = (
+            1j * D_tensor_alt[:, :, nd * (nd + 1) : nd * (nd + 2)]
+        )
 
         return D_tensor_alt
 
     def calculate_potential_squared(self):
         potentialsq_temp = 0.25 * einsum("xiijj->x", self.x4_temp)
-        potentialsq_temp += self.lambda_ * einsum("xiijjj->x", self.x5_temp[:, :, :, :-1, :-1, 1:])
-        potentialsq_temp += -self.lambda_ / 3 * einsum("xiijjj->x", self.x5_temp[:, :, :, 1:, 1:, 1:])
-        potentialsq_temp += self.lambda_**2 / 9 * einsum("xiiijjj->x", self.x6_temp[:, 1:, 1:, 1:, 1:, 1:, 1:])
-        potentialsq_temp += self.lambda_**2 * einsum("xiiijjj->x", self.x6_temp[:, :-1, :-1, 1:, :-1, :-1, 1:])
-        potentialsq_temp += -2 / 3 * self.lambda_**2 * einsum("xiiijjj->x", self.x6_temp[:, 1:, 1:, 1:, 0:-1, 0:-1, 1:])
+        potentialsq_temp += self.lambda_ * einsum(
+            "xiijjj->x", self.x5_temp[:, :, :, :-1, :-1, 1:]
+        )
+        potentialsq_temp += (
+            -self.lambda_ / 3 * einsum("xiijjj->x", self.x5_temp[:, :, :, 1:, 1:, 1:])
+        )
+        potentialsq_temp += (
+            self.lambda_**2 / 9 * einsum("xiiijjj->x", self.x6_temp[:, 1:, 1:, 1:, 1:, 1:, 1:])
+        )
+        potentialsq_temp += self.lambda_**2 * einsum(
+            "xiiijjj->x", self.x6_temp[:, :-1, :-1, 1:, :-1, :-1, 1:]
+        )
+        potentialsq_temp += (
+            -2
+            / 3
+            * self.lambda_**2
+            * einsum("xiiijjj->x", self.x6_temp[:, 1:, 1:, 1:, 0:-1, 0:-1, 1:])
+        )
 
         self.potential_squared = np.zeros_like(self.overlap)
         self.potential_squared[self.myrow_indices, self.mycol_indices] = potentialsq_temp
-        self.potential_squared[self.mycol_indices, self.myrow_indices] = np.conj(potentialsq_temp)
+        self.potential_squared[self.mycol_indices, self.myrow_indices] = np.conj(
+            potentialsq_temp
+        )
         return self.potential_squared
 
     def calculate_Hamiltonian(self):
@@ -1647,14 +1917,20 @@ class WF:
             H_deriv_full = np.zeros_like(H_deriv)
         else:
             H_deriv_full = None
-        self.comm.Reduce([H_deriv, MPI.COMPLEX16], [H_deriv_full, MPI.COMPLEX16], op=MPI.SUM, root=0)
+        self.comm.Reduce(
+            [H_deriv, MPI.COMPLEX16], [H_deriv_full, MPI.COMPLEX16], op=MPI.SUM, root=0
+        )
         if self.rank == 0:
             if include_kinetic:
                 H_deriv_full += -0.5 * einsum(
-                    "ij,jk->ijk", self.potential[:, si:] + self.kinetic[:, si:], self.fodmd[si:, :]
+                    "ij,jk->ijk",
+                    self.potential[:, si:] + self.kinetic[:, si:],
+                    self.fodmd[si:, :],
                 )
             else:
-                H_deriv_full += -0.5 * einsum("ij,jk->ijk", self.potential[:, si:], self.fodmd[si:, :])
+                H_deriv_full += -0.5 * einsum(
+                    "ij,jk->ijk", self.potential[:, si:], self.fodmd[si:, :]
+                )
         return H_deriv_full
 
     def calculate_Hamiltonian_squared(self):
@@ -1668,13 +1944,19 @@ class WF:
         si = start_index_WFnew
         H2_deriv = self.calculate_full_potential_squared_deriv_matrix(start_index_WFnew)
         if include_kinetic:
-            H2_deriv += self.calculate_full_kinetic_energy_squared_deriv(start_index_WFnew)  # Takes second most time
-            H2_deriv += self.calculate_full_potential_times_kinetic_deriv(start_index_WFnew)  # Takes most time
+            H2_deriv += self.calculate_full_kinetic_energy_squared_deriv(
+                start_index_WFnew
+            )  # Takes second most time
+            H2_deriv += self.calculate_full_potential_times_kinetic_deriv(
+                start_index_WFnew
+            )  # Takes most time
         if self.rank == 0:
             H2_deriv_full = np.zeros_like(H2_deriv)
         else:
             H2_deriv_full = None
-        self.comm.Reduce([H2_deriv, MPI.COMPLEX16], [H2_deriv_full, MPI.COMPLEX16], op=MPI.SUM, root=0)
+        self.comm.Reduce(
+            [H2_deriv, MPI.COMPLEX16], [H2_deriv_full, MPI.COMPLEX16], op=MPI.SUM, root=0
+        )
         if self.rank == 0:
             if include_kinetic:
                 H2_deriv_full += -0.5 * einsum(
@@ -1685,19 +1967,25 @@ class WF:
                     self.fodmd[si:, :],
                 )
             else:
-                H2_deriv_full += -0.5 * einsum("ij,jk->ijk", self.potential_squared[:, si:], self.fodmd[si:, :])
+                H2_deriv_full += -0.5 * einsum(
+                    "ij,jk->ijk", self.potential_squared[:, si:], self.fodmd[si:, :]
+                )
         return H2_deriv_full
 
     def calculate_S_mat(self, start_index_WFnew, h):
         if h == 0:
             self.S_mat = self.overlap[start_index_WFnew:, start_index_WFnew:]
         else:
-            self.S_mat = (self.overlap + h**2 / 4 * self.Hsquared)[start_index_WFnew:, start_index_WFnew:]
+            self.S_mat = (self.overlap + h**2 / 4 * self.Hsquared)[
+                start_index_WFnew:, start_index_WFnew:
+            ]
         return self.S_mat
 
     def calculate_rho_vec(self, start_index_WFnew, h):
         if h == 0:
-            rho_mat = self.overlap[:start_index_WFnew, start_index_WFnew:]  # Upper right corner
+            rho_mat = self.overlap[
+                :start_index_WFnew, start_index_WFnew:
+            ]  # Upper right corner
         else:
             rho_mat = (self.overlap - h**2 / 4 * self.Hsquared + 1j * h * self.H)[
                 :start_index_WFnew, start_index_WFnew:
@@ -1731,8 +2019,12 @@ class WF:
         H = self.calculate_Hamiltonian()
         H2 = self.calculate_Hamiltonian_squared()
         inner_ovlp = np.conj(new_lin_params).T @ O[si:, si:] @ new_lin_params
-        old_old_term = np.conj(old_lin_params).T @ (O[:si, :si] + h**2 * H2[:si, :si]) @ old_lin_params
-        cross_terms = -2 * (np.conj(new_lin_params).T @ (O[si:, :si] - h * 1j * H[si:, :si]) @ old_lin_params)
+        old_old_term = (
+            np.conj(old_lin_params).T @ (O[:si, :si] + h**2 * H2[:si, :si]) @ old_lin_params
+        )
+        cross_terms = -2 * (
+            np.conj(new_lin_params).T @ (O[si:, :si] - h * 1j * H[si:, :si]) @ old_lin_params
+        )
         return real(inner_ovlp + old_old_term + cross_terms)
 
     def calculate_euler_deriv(self, si, h):
@@ -1741,8 +2033,12 @@ class WF:
             self.setUpDerivs(si, Hsquared=False)
             S_deriv_vecs = self.ovlp_deriv[si:]
             rho_deriv_vecs = self.ovlp_deriv + 1j * self.H_deriv * h
-            rho_indices = einsum("abc,a->bc", rho_deriv_vecs[:si], conj(self.coefficients[:si]))
-            opt_c_rep = np.repeat(opt_c[:, np.newaxis], self.num_dimensions * (self.num_dimensions + 3), axis=1)
+            rho_indices = einsum(
+                "abc,a->bc", rho_deriv_vecs[:si], conj(self.coefficients[:si])
+            )
+            opt_c_rep = np.repeat(
+                opt_c[:, np.newaxis], self.num_dimensions * (self.num_dimensions + 3), axis=1
+            )
             rho_optc_prods = real((rho_indices) * opt_c_rep + conj((rho_indices) * opt_c_rep))
             optc_smat_prod = einsum("a,aij,i->ij", conj(opt_c), S_deriv_vecs, opt_c) + einsum(
                 "i,aij,a->ij", conj(opt_c), conj(S_deriv_vecs), opt_c
@@ -1753,12 +2049,13 @@ class WF:
     def rothe_jacobian(self, start_index_WFnew, h, include_kinetic=True):
         self.setUpDerivs(start_index_WFnew, include_kinetic=include_kinetic)
         if self.rank == 0:
-            # if "opt_c" not in dir():
             self.rothe_optimal_c_normalization(start_index_WFnew, h)
             S_deriv_vecs = self.calculate_all_S_deriv_vecs(start_index_WFnew, h)
             rho_indices = self.calculate_all_rho_derivs(start_index_WFnew, h)
             opt_c = self.opt_c
-            opt_c_rep = np.repeat(opt_c[:, np.newaxis], self.num_dimensions * (self.num_dimensions + 3), axis=1)
+            opt_c_rep = np.repeat(
+                opt_c[:, np.newaxis], self.num_dimensions * (self.num_dimensions + 3), axis=1
+            )
             rho_optc_prods = real((rho_indices) * opt_c_rep + conj((rho_indices) * opt_c_rep))
             optc_smat_prod = einsum("a,aij,i->ij", conj(opt_c), S_deriv_vecs, opt_c) + einsum(
                 "i,aij,a->ij", conj(opt_c), conj(S_deriv_vecs), opt_c
@@ -1791,7 +2088,9 @@ class WF:
         self.ovlp_deriv = self.calculate_full_overlap_deriv_matrix(start_index_WFnew)
         if self.h > 0:
             if Hsquared:
-                self.Hsquared_deriv = self.calculate_Hamiltonian_squared_deriv(start_index_WFnew, include_kinetic)
+                self.Hsquared_deriv = self.calculate_Hamiltonian_squared_deriv(
+                    start_index_WFnew, include_kinetic
+                )
             self.H_deriv = self.calculate_Hamiltonian_deriv(start_index_WFnew, include_kinetic)
         else:
             self.H_deriv = np.zeros_like(self.ovlp_deriv)
@@ -1802,16 +2101,28 @@ class WF:
         return S_deriv_vecs[start_index_WFnew:]
 
     def calculate_all_rho_derivs(self, start_index_WFnew, h):
-        rho_deriv_vecs = self.ovlp_deriv - h**2 / 4 * self.Hsquared_deriv + 1j * self.H_deriv * h
-        return einsum("abc,a->bc", rho_deriv_vecs[:start_index_WFnew], conj(self.coefficients[:start_index_WFnew]))
+        rho_deriv_vecs = (
+            self.ovlp_deriv - h**2 / 4 * self.Hsquared_deriv + 1j * self.H_deriv * h
+        )
+        return einsum(
+            "abc,a->bc",
+            rho_deriv_vecs[:start_index_WFnew],
+            conj(self.coefficients[:start_index_WFnew]),
+        )
 
-    def calculate_overlap_tildePhim(self, start_index_WFnew, h):  # Calculate <\tilde \Phi_m|\tilde \Phi_m>
+    def calculate_overlap_tildePhim(
+        self, start_index_WFnew, h
+    ):  # Calculate <\tilde \Phi_m|\tilde \Phi_m>
         S = self.overlap[
             :start_index_WFnew, :start_index_WFnew
-        ].copy()  # NEEDS TO BE A FUCKING COPY OTHERWISE THE WHOLE SHIT CRASHES LIKE THE FUCKING MALAYSIA AIRLINES
+        ].copy()  # Copy to avoid mutating the original overlap block during S update.
         contribution = self.Hsquared[:start_index_WFnew, :start_index_WFnew]
         S += 0.25 * h**2 * contribution
-        return conj(self.coefficients[:start_index_WFnew]).T @ S @ self.coefficients[:start_index_WFnew]
+        return (
+            conj(self.coefficients[:start_index_WFnew]).T
+            @ S
+            @ self.coefficients[:start_index_WFnew]
+        )
 
     def rothe_error(self, start_index_WFnew, h):
         if self.rank == 0:
@@ -1819,60 +2130,11 @@ class WF:
             self.overlap_term = overlap_term
             self.rothe_optimal_c_normalization(start_index_WFnew, h)
             opt_c = self.opt_c
-            projection_term = 2 * conj(self.rho).T @ opt_c - conj(self.opt_c).T @ self.Smat @ opt_c
+            projection_term = (
+                2 * conj(self.rho).T @ opt_c - conj(self.opt_c).T @ self.Smat @ opt_c
+            )
             difference = overlap_term - projection_term
             if np.isnan(difference):
                 return 100
             else:
                 return abs(real(difference))  # numerical noise makes this not exactly real
-
-
-if __name__ == "__main__":
-    from numpy import array
-
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    start = time.time()
-    size = comm.Get_size()
-    dim = 6
-    h = 0.01
-    num = num_gauss = 6
-    m = 2
-    np.random.seed(42)  # Use same seed acreoss all processes
-
-    cvals = np.random.rand(num_gauss * m) - 0.5 + 1j * (np.random.rand(num_gauss * m) - 0.5)
-    params = np.random.rand(num_gauss * m, dim * (dim + 3)) * 1e-1
-    k = -1
-    for i in range(1, dim + 1):
-        k += i
-        params[:, k] = sqrt(1 / 2) + 0.3 * (
-            np.random.rand() - 0.5
-        )  # Set diagonal of A matrix equal to 1/2 plus some random perturbation
-
-    params[num:, :] = params[:num, :] + 0.1 * (
-        np.random.rand(params[:num, :].shape[0], params[:num, :].shape[1]) - 0.5
-    )  # make it symmetric
-    wf = WF(params, np.asarray(cvals), calculate_Gradient=True, h=0.2)
-    deriv_H = wf.calculate_Hamiltonian_deriv(num)
-    deriv_H2 = wf.calculate_Hamiltonian_squared_deriv(num)
-    re = wf.rothe_error(num, h)
-    red = wf.rothe_jacobian(num, h)
-    end = time.time()
-    if rank == 0:
-        print("Time taken: ", end - start)
-        print(re)
-        print(red)
-    if rank == 0:
-        # print(wf.rothe_error(num,0.001))
-        # print(wf.overlap)
-
-        if (num_gauss == 2 and dim == 2) or (num_gauss == 5 and dim == 4):
-            pass
-            referenceH2 = np.load("reference_H2_size=%d,num_gauss=%d,dim=%d.npy" % (1, num_gauss, dim))
-            referenceH = np.load("reference_H_size=%d,num_gauss=%d,dim=%d.npy" % (1, num_gauss, dim))
-            print("Same value across different threads: ")
-            print("H2 correct")
-            print(np.allclose(deriv_H2, referenceH2))
-            print("H correct")
-            print(np.allclose(deriv_H, referenceH))
-            # print(overlap_deriv)

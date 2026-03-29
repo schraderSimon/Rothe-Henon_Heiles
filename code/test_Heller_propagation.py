@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 from numpy import sqrt
-from WF_HenonHeiles_parallel import WF, propagate_kinetic_analytical
+from utils_heller import propagate_kinetic_analytical
+from WF_HenonHeiles_parallel import WF
 
 
 @pytest.mark.parametrize("dimension,len_initial", [(2, 2), (2, 4), (3, 2), (3, 4)])

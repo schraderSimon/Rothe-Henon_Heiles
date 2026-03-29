@@ -8,10 +8,6 @@ def solve(A, b):
     return np.linalg.solve(A + np.eye(len(A)) * 1e-8, b)
 
 
-from numpy import nan_to_num as ntn
-from scipy.optimize import minimize
-
-
 def compute_hhg_spectrum(time_points, dipole_moment, hann_window=False):
 
     dip = scipy.signal.detrend(dipole_moment, type="constant")

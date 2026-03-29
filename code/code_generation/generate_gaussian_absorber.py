@@ -1,14 +1,14 @@
-from numpy import pi, exp, sqrt
 import matplotlib.pyplot as plt
 
 # Generate code to the text in the figure bigger
 plt.rcParams.update({"font.size": 18})
 
+import sys
+
 import numpy as np
 from scipy import linalg
+from scipy.optimize import brute, minimize
 from scipy.special import erf
-from scipy.optimize import minimize, brute
-import sys
 
 xmin = 7
 xmax = 15
@@ -100,7 +100,9 @@ def jacobian(a_vec, y, gridpoints):
     for k in range(len(a_vec)):
         multiple_D_k[:, k] = -ea[k] * grid2 * Phi[:, k]
         multiple_Dkc[:, k] = multiple_D_k[:, k] * c[k]
-    AB = multiple_Dkc - U @ (U.T @ (multiple_Dkc) - (Sigma_inv @ (Vt @ np.diag(multiple_D_k.T @ r_w))))
+    AB = multiple_Dkc - U @ (
+        U.T @ (multiple_Dkc) - (Sigma_inv @ (Vt @ np.diag(multiple_D_k.T @ r_w)))
+    )
     """
     for k in range(len(a_vec)):
         D_k=np.zeros((len(y),len(a_vec))) #Reset D_k to zero
@@ -118,7 +120,14 @@ from scipy.optimize import least_squares
 
 errtol = 1e-15
 sol = least_squares(
-    error_vector_alpha, a_vec_init, jac=jacobian, method="lm", args=(y, grid), xtol=errtol, gtol=errtol, ftol=errtol
+    error_vector_alpha,
+    a_vec_init,
+    jac=jacobian,
+    method="lm",
+    args=(y, grid),
+    xtol=errtol,
+    gtol=errtol,
+    ftol=errtol,
 )
 print("a")
 print(list(sol.x))

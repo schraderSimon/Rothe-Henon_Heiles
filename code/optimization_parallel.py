@@ -1,13 +1,16 @@
-from WF_HenonHeiles_parallel import *
-from scipy.optimize import minimize, fmin_bfgs, approx_fprime
+import os
+import time
 
 # import multiprocessing
 import h5py
-import time
-import warnings
+import numpy as np
 import scipy
-from numpy import arctanh, tanh, sin, arcsin, cosh, cos
+from mpi4py import MPI
+from numpy import arctanh, conj, cosh, log, real, sqrt, tanh
 from numpy.linalg import inv
+from scipy.optimize import minimize
+from utils_heller import propagate_kinetic_analytical
+from WF_HenonHeiles_parallel import WF
 
 
 class ConvergedError(Exception):
@@ -16,7 +19,18 @@ class ConvergedError(Exception):
 
 class TimeEvolution:
     def __init__(
-        self, wave_function, h, T, epsilon, t0, error_t0, filename, dimension, max_num_Gaussians=20, norm=1, energy=0
+        self,
+        wave_function,
+        h,
+        T,
+        epsilon,
+        t0,
+        error_t0,
+        filename,
+        dimension,
+        max_num_Gaussians=20,
+        norm=1.0,
+        energy=0.0,
     ):
         self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
@@ -113,8 +127,12 @@ class TimeEvolution:
         if self.rank == 0:
             if not os.path.isfile(filename):
                 with h5py.File(filename, "w") as data_file:
-                    data_file.create_dataset("parameters_t=%.3f" % self.t, data=self.wf.nonlin_params)
-                    data_file.create_dataset("coefficients_t=%.3f" % self.t, data=self.wf.nonlin_params)
+                    data_file.create_dataset(
+                        "parameters_t=%.3f" % self.t, data=self.wf.nonlin_params
+                    )
+                    data_file.create_dataset(
+                        "coefficients_t=%.3f" % self.t, data=self.wf.nonlin_params
+                    )
                     new_times = [t0]
                     accumulated_error = [0]
                     normalizations = [1]
@@ -128,13 +146,21 @@ class TimeEvolution:
                     times_read = np.array(data_file["times"])
                     index_to_delete_after = np.argmin(abs(times_read - t0))
                     if t0 > (times_read[-1] + 1e-5):
-                        print("You cannot start your run from this time, as no reference data exists")
+                        print(
+                            "You cannot start your run from this time, as no reference data exists"
+                        )
                         raise IndexError
                     else:
                         times_new = np.array(data_file["times"])[: index_to_delete_after + 1]
-                        re_new = np.array(data_file["rothe_error"])[: index_to_delete_after + 1]
-                        norm_new = np.array(data_file["normalizations"])[: index_to_delete_after + 1]
-                        energies_new = np.array(data_file["energies"])[: index_to_delete_after + 1]
+                        re_new = np.array(data_file["rothe_error"])[
+                            : index_to_delete_after + 1
+                        ]
+                        norm_new = np.array(data_file["normalizations"])[
+                            : index_to_delete_after + 1
+                        ]
+                        energies_new = np.array(data_file["energies"])[
+                            : index_to_delete_after + 1
+                        ]
                         del data_file["rothe_error"]
                         del data_file["times"]
                         del data_file["energies"]
@@ -144,12 +170,16 @@ class TimeEvolution:
                         data_file.create_dataset("energies", data=energies_new)
                         data_file.create_dataset("normalizations", data=norm_new)
                         if self.t0 >= self.h - 1e-10:
-                            self.params_oldold_nonlin = np.array(data_file["parameters_t=%.3f" % (self.t0 - self.h)])
+                            self.params_oldold_nonlin = np.array(
+                                data_file["parameters_t=%.3f" % (self.t0 - self.h)]
+                            )
 
     def rothe_gradient(self, nonlin_params):
         start_index = len(self.params_old_lin)
         start = time.time()
-        deriv = self.WF_opt.rothe_jacobian(start_index_WFnew=start_index, h=self.h, include_kinetic=True)
+        deriv = self.WF_opt.rothe_jacobian(
+            start_index_WFnew=start_index, h=self.h, include_kinetic=True
+        )
         end = time.time()
         deriv = self.comm.bcast(deriv, root=0)
         return deriv
@@ -157,7 +187,9 @@ class TimeEvolution:
     def rothe_gradient_no_kinetic(self, nonlin_params):
         start_index = len(self.params_old_lin)
         start = time.time()
-        deriv = self.WF_opt.rothe_jacobian(start_index_WFnew=start_index, h=self.h, include_kinetic=False)
+        deriv = self.WF_opt.rothe_jacobian(
+            start_index_WFnew=start_index, h=self.h, include_kinetic=False
+        )
         end = time.time()
         deriv = self.comm.bcast(deriv, root=0)
         return deriv
@@ -166,14 +198,16 @@ class TimeEvolution:
         n = self.dimension
         num_basis_functions = len(nonlin_params) // (n * (n + 3))
         start_index = len(self.params_old_lin)
-        full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), nonlin_params))
+        full_nonlin = np.concatenate(
+            (np.array(self.params_old_nonlin).flatten(), nonlin_params)
+        )
         full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
         full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
 
         optimization_WF = WF(full_nonlin, full_lin, lambda_=self.lambda_)
         self.WF_opt = optimization_WF
         RE = optimization_WF.rothe_error(start_index_WFnew=start_index, h=self.h)
-        """Send Rothe error to all processes. 
+        """Send Rothe error to all processes.
         The reason for this is that all processes need to know the RE in order for the optimization to work.
         """
 
@@ -184,7 +218,9 @@ class TimeEvolution:
         n = self.dimension
         num_basis_functions = len(nonlin_params) // (n * (n + 3))
         start_index = len(self.params_old_lin)
-        full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), nonlin_params))
+        full_nonlin = np.concatenate(
+            (np.array(self.params_old_nonlin).flatten(), nonlin_params)
+        )
         full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
         full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
         if debug:
@@ -194,7 +230,7 @@ class TimeEvolution:
         optimization_WF.setupMatrices_noKinetic()
         self.WF_opt = optimization_WF
         RE = optimization_WF.rothe_error(start_index_WFnew=start_index, h=self.h)
-        """Send Rothe error to all processes. 
+        """Send Rothe error to all processes.
         The reason for this is that all processes need to know the RE in order for the optimization to work.
         """
 
@@ -206,10 +242,14 @@ class TimeEvolution:
         num_basis_functions = len(nonlin_params) // (n * (n + 3))
 
         start_index = len(self.params_old_lin)
-        full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), nonlin_params.flatten()))
+        full_nonlin = np.concatenate(
+            (np.array(self.params_old_nonlin).flatten(), nonlin_params.flatten())
+        )
         full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
         full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
-        optimization_WF = WF(full_nonlin, full_lin, lambda_=self.lambda_, calculate_Gradient=False, h=0)
+        optimization_WF = WF(
+            full_nonlin, full_lin, lambda_=self.lambda_, calculate_Gradient=False, h=0
+        )
         self.WF_opt = optimization_WF
         RE = optimization_WF.rothe_error(start_index_WFnew=start_index, h=0)
 
@@ -236,7 +276,9 @@ class TimeEvolution:
             L[np.tril_indices(n)] = L_coefs
             K[np.tril_indices(n)] = K_coefs
             oldmat = L @ L.T + 1j * (K + K.T)
-            old_shift = params_i[n * (n + 1) : n * (n + 1) + n] + 1j * (params_i[int(n * (n + 1)) + n :])
+            old_shift = params_i[n * (n + 1) : n * (n + 1) + n] + 1j * (
+                params_i[int(n * (n + 1)) + n :]
+            )
             sum_matrix = oldmat + np.conj(oldmat)
             invert = np.linalg.inv(sum_matrix)
             bvec = old_shift.T @ oldmat + conj(old_shift.T @ oldmat)
@@ -260,7 +302,9 @@ class TimeEvolution:
                 sum_matrixN = newmat + np.conj(newmat)
                 invertN = np.linalg.inv(sum_matrixN)
                 bvecN = updated_nonlin_shift.T @ newmat + conj(updated_nonlin_shift.T @ newmat)
-                vmipN = np.einsum("a,ab,b->", updated_nonlin_shift, newmat, updated_nonlin_shift)
+                vmipN = np.einsum(
+                    "a,ab,b->", updated_nonlin_shift, newmat, updated_nonlin_shift
+                )
                 diagonal_exponentN = bvecN.T @ invertN @ bvecN - vmipN - conj(vmipN)
                 eigsN = np.prod(sqrt(np.linalg.eig(sum_matrixN)[0]))
                 normalization_new = 1 / eigsN / 2
@@ -286,10 +330,19 @@ class TimeEvolution:
         mask_lin_params = self.mask_lin
         full_lin = np.concatenate((mask_lin_params, np.zeros(num_basis_functions)))
         optimization_WF = WF(
-            full_nonlin, full_lin, lambda_=self.lambda_, calculate_Gradient=False, h=0.00, onlyX1X2=True
+            full_nonlin,
+            full_lin,
+            lambda_=self.lambda_,
+            calculate_Gradient=False,
+            h=0.00,
+            onlyX1X2=True,
         )
-        error_calculate_c = np.concatenate((mask_lin_params.copy(), -self.params_old_lin.copy()))
-        errorx = abs(np.conj(error_calculate_c.T) @ optimization_WF.overlap @ error_calculate_c)
+        error_calculate_c = np.concatenate(
+            (mask_lin_params.copy(), -self.params_old_lin.copy())
+        )
+        errorx = abs(
+            np.conj(error_calculate_c.T) @ optimization_WF.overlap @ error_calculate_c
+        )
         return optimization_WF, errorx
 
     def rothe_error_mask(self, nonlin_params):
@@ -306,7 +359,9 @@ class TimeEvolution:
         num_gauss_total = self.WF_opt.num_gaussians
         num_gauss_optimization = len(nonlin_params) // (self.dimension * (self.dimension + 3))
         indices = np.arange(num_gauss_total - num_gauss_optimization, num_gauss_total)
-        nonlin_reshaped = np.reshape(nonlin_params, (-1, self.dimension * (self.dimension + 3)))
+        nonlin_reshaped = np.reshape(
+            nonlin_params, (-1, self.dimension * (self.dimension + 3))
+        )
         self.WF_opt.update_overlap_and_overlap_derivs(indices, nonlin_reshaped)
         RE = self.WF_opt.rothe_error(start_index_WFnew=start_index, h=0)
         self.WF_opt.rothe_optimal_c_normalization(start_index, h=0)
@@ -339,8 +394,6 @@ class TimeEvolution:
                 error_set.append(1e100)
         error_set = np.nan_to_num(error_set, nan=1e15, posinf=1e15, neginf=1e15)
         i = np.argmin(error_set)
-        if self.rank == 0:
-            print("alpha: %.2f" % alphas[i])
         return old + direction * alphas[i]
 
     def get_start_parameters_noKinetic(self, startGuess, direction=None):
@@ -357,12 +410,18 @@ class TimeEvolution:
                 error_set.append(1e100)
         error_set = np.nan_to_num(error_set, nan=1e15, posinf=1e15, neginf=1e15)
         i = np.argmin(error_set)
-        if self.rank == 0:
-            print("alpha: %.2f" % alphas[i])
         return startGuess + direction * alphas[i]
 
     def minimize_transformed_bonds(
-        self, error_function, gradient, maxiter, start_params, args, gtol=0, multi_bonds=5e-1, printx=False
+        self,
+        error_function,
+        gradient,
+        maxiter,
+        start_params,
+        args,
+        gtol=0,
+        multi_bonds=5e-1,
+        printx=False,
     ):
         """
         Minimizes with min_max bonds as described in https://lmfit.github.io/lmfit-py/bounds.html
@@ -430,7 +489,10 @@ class TimeEvolution:
             f_storage.append(sqrt(fun))
             compareto = 20
             if self.numiter >= 30:  # At least 50 iterations
-                if f_storage[-1] / f_storage[-compareto - 1] > 0.9995 and f_storage[-1] / f_storage[-compareto - 1] < 1:
+                if (
+                    f_storage[-1] / f_storage[-compareto - 1] > 0.9995
+                    and f_storage[-1] / f_storage[-compareto - 1] < 1
+                ):
                     if self.rank == 0:
                         print("The function is not decreasing anymore.")
                     self.transformed_sol = xval
@@ -444,7 +506,13 @@ class TimeEvolution:
                 transformed_params,
                 method="BFGS",
                 jac=transformed_gradient,
-                options={"maxiter": maxiter, "gtol": gtol, "hess_inv0": hess_inv0, "c1": 1e-4, "c2": 0.9},
+                options={
+                    "maxiter": maxiter,
+                    "gtol": gtol,
+                    "hess_inv0": hess_inv0,
+                    "c1": 1e-4,
+                    "c2": 0.9,
+                },
                 callback=callback_func,
             )
             self.transformed_sol = solver.x
@@ -460,7 +528,10 @@ class TimeEvolution:
             pass
         end = time.time()
         if self.rank == 0:
-            print("  REG: Time to optimize: %.3f seconds, niter : %d" % (end - start, self.numiter))
+            print(
+                "  REG: Time to optimize: %.3f seconds, niter : %d"
+                % (end - start, self.numiter)
+            )
         return untransform_params(self.transformed_sol), self.numiter, self.minval
 
     def time_evolve(self):
@@ -498,7 +569,10 @@ class TimeEvolution:
             niter = solver.nit
             end = time.time()
             if self.rank == 0:
-                print("UNREG: Time to optimize: %f; number of iterations: %d" % (end - start, niter))
+                print(
+                    "UNREG: Time to optimize: %f; number of iterations: %d"
+                    % (end - start, niter)
+                )
             rotheerror = solver.fun
 
         else:
@@ -517,7 +591,9 @@ class TimeEvolution:
         if self.rank == 0:
             print("Finallo Rothe error: %f/%f" % ((sqrt(rotheerror), self.maxerr)))
 
-        self.comm.bcast(best_nonlin_params, root=0)  # Just to make sure that each thread has the same parameters?
+        self.comm.bcast(
+            best_nonlin_params, root=0
+        )  # Just to make sure that each thread has the same parameters?
 
         self.new_params = best_nonlin_params
         n = self.dimension
@@ -525,7 +601,9 @@ class TimeEvolution:
 
         self.accumulated_error += np.sqrt(rotheerror)
         num_basis_functions = len(best_nonlin_params) // (n * (n + 3))
-        full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), best_nonlin_params))
+        full_nonlin = np.concatenate(
+            (np.array(self.params_old_nonlin).flatten(), best_nonlin_params)
+        )
         start_index = len(self.params_old_lin)
         full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
         full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
@@ -583,14 +661,14 @@ class TimeEvolution:
                 optimization_in_c,
                 c_init,
                 jac=deriv_in_c,
-                constraints=[{"type": "eq", "fun": constraint1}, {"type": "eq", "fun": constraint2}],
+                constraints=[
+                    {"type": "eq", "fun": constraint1},
+                    {"type": "eq", "fun": constraint2},
+                ],
                 options={"maxiter": 200, "ftol": 1e-10},
             )
             c_new = solver.x[: len(solver.x) // 2] + 1j * solver.x[len(solver.x) // 2 :]
             best_lin_params = c_new
-            new_RE = sqrt(optimization_in_c(solver.x))
-            increase = 100 * new_RE / sqrt(rotheerror) - 100
-            print("Increase in error due to conservation: %.4f percent" % (increase))
         self.comm.bcast(best_lin_params, root=0)  # Share with other nodes
 
         self.params_oldold_nonlin = self.params_old_nonlin
@@ -606,20 +684,22 @@ class TimeEvolution:
                 )
             )
             print(best_nonlin_params.shape, best_lin_params.shape)
-        new_WF = WF(np.reshape(best_nonlin_params, (-1, n * (n + 3))), best_lin_params, lambda_=self.lambda_)
+        new_WF = WF(
+            np.reshape(best_nonlin_params, (-1, n * (n + 3))),
+            best_lin_params,
+            lambda_=self.lambda_,
+        )
 
-        normalization = abs(np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params))
+        normalization = abs(
+            np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params)
+        )
         energy = abs(np.conj(best_lin_params).T @ new_WF.H @ np.array(best_lin_params))
-        dfo = np.array(new_WF.calculate_gaussian_distances_from_origo())  # Distances from origo
-        eigvals = np.linalg.eigh(new_WF.overlap)[0]
+        dfo = np.array(
+            new_WF.calculate_gaussian_distances_from_origo()
+        )  # Distances from origo
 
         if self.rank == 0:
             print("Normalization: %.10f, Energy: %.10f" % ((normalization), (energy)))
-            print("Updated lin parameters (absolute squared):")
-            print(np.abs(best_lin_params) ** 2)
-            print("Distances from origo:")
-            print(dfo)
-            print("Smallest three eigenvalues of overlap matrix: ", eigvals[:3])
             # print("Ovlerpa matrix:")
             # print(np.array2string(abs(new_WF.overlap), precision=1, suppress_small=False,formatter={'float_kind':lambda x: f"{x:.1e}"}))
             # print("Number of small coefficients: %d"%(np.sum(abs(new_WF.overlap) < -1)//2))
@@ -631,8 +711,6 @@ class TimeEvolution:
             mask_err = self.rothe_error_mask(best_nonlin_params)
             # self.rothe_error_mask_update(best_nonlin_params)
             # sys.exit(0)
-            if self.rank == 0:
-                print("Error of the mask: %e" % sqrt(mask_err))
         if sqrt(mask_err) > 1e-3:
 
             grad0 = self.rothe_gradient_mask(best_nonlin_params)
@@ -666,8 +744,14 @@ class TimeEvolution:
             self.params_old_lin = best_lin_params
             self.params_old_nonlin = best_nonlin_params
             self.removed_at_prev_timestep = 0
-            new_WF = WF(np.reshape(best_nonlin_params, (-1, n * (n + 3))), best_lin_params, lambda_=self.lambda_)
-            normalization = abs(np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params))
+            new_WF = WF(
+                np.reshape(best_nonlin_params, (-1, n * (n + 3))),
+                best_lin_params,
+                lambda_=self.lambda_,
+            )
+            normalization = abs(
+                np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params)
+            )
             energy = abs(np.conj(best_lin_params).T @ new_WF.H @ np.array(best_lin_params))
             self.normalization = normalization
             self.energy = energy
@@ -693,26 +777,40 @@ class TimeEvolution:
                 print("Removing a Gaussian as it's beyond %d" % remove_pos)
             elem = left[0]
             nonlin_params_removed_indices = list(range(elem)) + list(range(elem + 1, num_bas))
-            nonlin_params_removed = np.reshape(best_nonlin_params, (-1, n * (n + 3)))[nonlin_params_removed_indices, :]
+            nonlin_params_removed = np.reshape(best_nonlin_params, (-1, n * (n + 3)))[
+                nonlin_params_removed_indices, :
+            ]
             new_lin_params = list(best_lin_params[nonlin_params_removed_indices].copy())
             new_nonlin_params = list(nonlin_params_removed.copy())
             new_nonlin_params = np.array(new_nonlin_params)
             new_lin_params = np.array(new_lin_params)
-            full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), new_nonlin_params.flatten()))
+            full_nonlin = np.concatenate(
+                (np.array(self.params_old_nonlin).flatten(), new_nonlin_params.flatten())
+            )
             full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
             full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
             self.params_old_lin = new_lin_params
             self.params_old_nonlin = new_nonlin_params
             best_nonlin_params = new_nonlin_params
-            new_WF = WF(np.reshape(new_nonlin_params, (-1, n * (n + 3))), new_lin_params, lambda_=self.lambda_)
-            normalization = abs(np.conj(new_lin_params).T @ new_WF.overlap @ np.array(new_lin_params))
-            energy = abs(np.conj(new_lin_params).T @ new_WF.calculate_Hamiltonian() @ np.array(new_lin_params))
+            new_WF = WF(
+                np.reshape(new_nonlin_params, (-1, n * (n + 3))),
+                new_lin_params,
+                lambda_=self.lambda_,
+            )
+            normalization = abs(
+                np.conj(new_lin_params).T @ new_WF.overlap @ np.array(new_lin_params)
+            )
+            energy = abs(
+                np.conj(new_lin_params).T
+                @ new_WF.calculate_Hamiltonian()
+                @ np.array(new_lin_params)
+            )
             dfo = np.array(new_WF.calculate_gaussian_distances_from_origo())
 
             if self.rank == 0:
-                print("Normalization: %.10f, Energy: %.10f" % (abs(normalization), abs(energy)))
-                print("Distances from origo:")
-                print(dfo)
+                print(
+                    "Normalization: %.10f, Energy: %.10f" % (abs(normalization), abs(energy))
+                )
             left = np.where(np.abs(new_lin_params) < 1e-20)[0]
         self.start_index = len(self.params_old_lin)
 
@@ -724,10 +822,14 @@ class TimeEvolution:
             print("Start time t0=%.3f" % self.t)
         nonlin_params_initial = np.array(self.params_old_nonlin.copy()).flatten()
         if self.removed_at_prev_timestep >= 0:
-            nonlin_params_initial = self.get_start_parameters_noKinetic(nonlin_params_initial, self.direction)
+            nonlin_params_initial = self.get_start_parameters_noKinetic(
+                nonlin_params_initial, self.direction
+            )
         # Now, we do half a time step with the kinetic energy
         nonlin_propagated, c_propagated = propagate_kinetic_analytical(
-            self.params_old_nonlin.reshape(-1, self.dimension * (self.dimension + 3)), self.params_old_lin, self.h / 2
+            self.params_old_nonlin.reshape(-1, self.dimension * (self.dimension + 3)),
+            self.params_old_lin,
+            self.h / 2,
         )
 
         nonlin_params_initial = np.asarray(nonlin_propagated).flatten()
@@ -767,7 +869,10 @@ class TimeEvolution:
             niter = solver.nit
             end = time.time()
             if self.rank == 0:
-                print("UNREG: Time to optimize: %f; number of iterations: %d" % (end - start, niter))
+                print(
+                    "UNREG: Time to optimize: %f; number of iterations: %d"
+                    % (end - start, niter)
+                )
             rotheerror = solver.fun
 
         else:
@@ -786,14 +891,18 @@ class TimeEvolution:
         if self.rank == 0:
             print("Finallo Rothe error: %f/%f" % ((sqrt(rotheerror), self.maxerr)))
 
-        self.comm.bcast(best_nonlin_params, root=0)  # Just to make sure that each thread has the same parameters?
+        self.comm.bcast(
+            best_nonlin_params, root=0
+        )  # Just to make sure that each thread has the same parameters?
         self.new_params = best_nonlin_params
         n = self.dimension
         divisible_by_5_timestep = int(np.round(self.t / self.h)) % 5 == 0
 
         self.accumulated_error += np.sqrt(rotheerror)
         num_basis_functions = len(best_nonlin_params) // (n * (n + 3))
-        full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), best_nonlin_params))
+        full_nonlin = np.concatenate(
+            (np.array(self.params_old_nonlin).flatten(), best_nonlin_params)
+        )
         start_index = len(self.params_old_lin)
         full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
         full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
@@ -808,7 +917,9 @@ class TimeEvolution:
         # The idea is: "kinetic" propagation exactly preserves the kinetic energy and the norm
         # The "non-kinetic" propagation should preserve the norm and the expectation value of the potential energy
         # Thus, we do not conserve the energy, but the expectation value of the potential energy
-        full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), best_nonlin_params))
+        full_nonlin = np.concatenate(
+            (np.array(self.params_old_nonlin).flatten(), best_nonlin_params)
+        )
         start_index = len(old_params_lin)
         full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
         full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
@@ -868,17 +979,14 @@ class TimeEvolution:
                 c_init,
                 method="SLSQP",
                 jac=deriv_in_c,
-                constraints=[{"type": "eq", "fun": constraint1}, {"type": "eq", "fun": constraint2}],
+                constraints=[
+                    {"type": "eq", "fun": constraint1},
+                    {"type": "eq", "fun": constraint2},
+                ],
                 options={"maxiter": 200, "ftol": 1e-10},
             )
             c_new = solver.x[: len(solver.x) // 2] + 1j * solver.x[len(solver.x) // 2 :]
             best_lin_params = c_new
-            new_RE = sqrt(optimization_in_c(solver.x))
-            # print(sqrt(re))
-            # print("old RE: ",sqrt(optimization_in_c(c_init)))
-            # print("new RE: ",new_RE)
-            increase = 100 * new_RE / sqrt(rotheerror) - 100
-            print("Increase in error due to conservation: %.4f percent" % (increase))
             print("Energy deviation: %.6f percent" % (100 * constraint2(solver.x)))
         self.comm.bcast(best_lin_params, root=0)  # Share with other nodes
         nonlin_propagated, c_propagated = propagate_kinetic_analytical(
@@ -902,20 +1010,22 @@ class TimeEvolution:
                 )
             )
             print(best_nonlin_params.shape, best_lin_params.shape)
-        new_WF = WF(np.reshape(best_nonlin_params, (-1, n * (n + 3))), best_lin_params, lambda_=self.lambda_)
+        new_WF = WF(
+            np.reshape(best_nonlin_params, (-1, n * (n + 3))),
+            best_lin_params,
+            lambda_=self.lambda_,
+        )
 
-        normalization = abs(np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params))
+        normalization = abs(
+            np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params)
+        )
         energy = abs(np.conj(best_lin_params).T @ new_WF.H @ np.array(best_lin_params))
-        dfo = np.array(new_WF.calculate_gaussian_distances_from_origo())  # Distances from origo
-        eigvals = np.linalg.eigh(new_WF.overlap)[0]
+        dfo = np.array(
+            new_WF.calculate_gaussian_distances_from_origo()
+        )  # Distances from origo
 
         if self.rank == 0:
             print("Normalization: %.10f, Energy: %.10f" % ((normalization), (energy)))
-            print("Updated lin parameters (absolute squared):")
-            print(np.abs(best_lin_params) ** 2)
-            print("Distances from origo:")
-            print(dfo)
-            print("Smallest three eigenvalues of overlap matrix: ", eigvals[:3])
             # print("Ovlerpa matrix:")
             # print(np.array2string(abs(new_WF.overlap), precision=1, suppress_small=False,formatter={'float_kind':lambda x: f"{x:.1e}"}))
             # print("Number of small coefficients: %d"%(np.sum(abs(new_WF.overlap) < -1)//2))
@@ -927,8 +1037,6 @@ class TimeEvolution:
             mask_err = self.rothe_error_mask(best_nonlin_params)
             # self.rothe_error_mask_update(best_nonlin_params)
             # sys.exit(0)
-            if self.rank == 0:
-                print("Error of the mask: %e" % sqrt(mask_err))
         if sqrt(mask_err) > 1e-3:
 
             grad0 = self.rothe_gradient_mask(best_nonlin_params)
@@ -962,8 +1070,14 @@ class TimeEvolution:
             self.params_old_lin = best_lin_params
             self.params_old_nonlin = best_nonlin_params
             self.removed_at_prev_timestep = 0
-            new_WF = WF(np.reshape(best_nonlin_params, (-1, n * (n + 3))), best_lin_params, lambda_=self.lambda_)
-            normalization = abs(np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params))
+            new_WF = WF(
+                np.reshape(best_nonlin_params, (-1, n * (n + 3))),
+                best_lin_params,
+                lambda_=self.lambda_,
+            )
+            normalization = abs(
+                np.conj(best_lin_params).T @ new_WF.overlap @ np.array(best_lin_params)
+            )
             energy = abs(np.conj(best_lin_params).T @ new_WF.H @ np.array(best_lin_params))
             self.normalization = normalization
             self.energy = energy
@@ -988,26 +1102,40 @@ class TimeEvolution:
                 print("Removing a Gaussian as it's beyond %d" % remove_pos)
             elem = left[0]
             nonlin_params_removed_indices = list(range(elem)) + list(range(elem + 1, num_bas))
-            nonlin_params_removed = np.reshape(best_nonlin_params, (-1, n * (n + 3)))[nonlin_params_removed_indices, :]
+            nonlin_params_removed = np.reshape(best_nonlin_params, (-1, n * (n + 3)))[
+                nonlin_params_removed_indices, :
+            ]
             new_lin_params = list(best_lin_params[nonlin_params_removed_indices].copy())
             new_nonlin_params = list(nonlin_params_removed.copy())
             new_nonlin_params = np.array(new_nonlin_params)
             new_lin_params = np.array(new_lin_params)
-            full_nonlin = np.concatenate((np.array(self.params_old_nonlin).flatten(), new_nonlin_params.flatten()))
+            full_nonlin = np.concatenate(
+                (np.array(self.params_old_nonlin).flatten(), new_nonlin_params.flatten())
+            )
             full_nonlin = np.reshape(full_nonlin, (-1, n * (n + 3)))
             full_lin = np.concatenate((self.params_old_lin, np.zeros(num_basis_functions)))
             self.params_old_lin = new_lin_params
             self.params_old_nonlin = new_nonlin_params
             best_nonlin_params = new_nonlin_params
-            new_WF = WF(np.reshape(new_nonlin_params, (-1, n * (n + 3))), new_lin_params, lambda_=self.lambda_)
-            normalization = abs(np.conj(new_lin_params).T @ new_WF.overlap @ np.array(new_lin_params))
-            energy = abs(np.conj(new_lin_params).T @ new_WF.calculate_Hamiltonian() @ np.array(new_lin_params))
+            new_WF = WF(
+                np.reshape(new_nonlin_params, (-1, n * (n + 3))),
+                new_lin_params,
+                lambda_=self.lambda_,
+            )
+            normalization = abs(
+                np.conj(new_lin_params).T @ new_WF.overlap @ np.array(new_lin_params)
+            )
+            energy = abs(
+                np.conj(new_lin_params).T
+                @ new_WF.calculate_Hamiltonian()
+                @ np.array(new_lin_params)
+            )
             dfo = np.array(new_WF.calculate_gaussian_distances_from_origo())
 
             if self.rank == 0:
-                print("Normalization: %.10f, Energy: %.10f" % (abs(normalization), abs(energy)))
-                print("Distances from origo:")
-                print(dfo)
+                print(
+                    "Normalization: %.10f, Energy: %.10f" % (abs(normalization), abs(energy))
+                )
             left = np.where(np.abs(new_lin_params) < 1e-20)[0]
         self.start_index = len(self.params_old_lin)
 
@@ -1023,16 +1151,22 @@ class TimeEvolution:
                 with h5py.File(self.filename, "r+") as data_file:
                     try:
                         data_file.create_dataset(
-                            "parameters_t=%.3f" % self.t, data=np.reshape(self.params_old_nonlin, (-1, n * (n + 3)))
+                            "parameters_t=%.3f" % self.t,
+                            data=np.reshape(self.params_old_nonlin, (-1, n * (n + 3))),
                         )
-                        data_file.create_dataset("coefficients_t=%.3f" % self.t, data=self.params_old_lin)
+                        data_file.create_dataset(
+                            "coefficients_t=%.3f" % self.t, data=self.params_old_lin
+                        )
                     except ValueError:
                         del data_file["parameters_t=%.3f" % self.t]
                         del data_file["coefficients_t=%.3f" % self.t]
                         data_file.create_dataset(
-                            "parameters_t=%.3f" % self.t, data=np.reshape(self.params_old_nonlin, (-1, n * (n + 3)))
+                            "parameters_t=%.3f" % self.t,
+                            data=np.reshape(self.params_old_nonlin, (-1, n * (n + 3))),
                         )
-                        data_file.create_dataset("coefficients_t=%.3f" % self.t, data=self.params_old_lin)
+                        data_file.create_dataset(
+                            "coefficients_t=%.3f" % self.t, data=self.params_old_lin
+                        )
                     old_times = data_file["times"]
                     new_times = list(old_times)
                     new_times.append(self.t)

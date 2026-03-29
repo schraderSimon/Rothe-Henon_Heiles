@@ -1,7 +1,7 @@
 import numpy as np
-import scipy.linalg as la
 import scipy
-from numpy import sqrt, exp, log, pi, einsum
+import scipy.linalg as la
+from numpy import einsum, exp, log, pi, sqrt
 from scipy.linalg import logm
 
 
@@ -23,7 +23,11 @@ def transform_ECG_heller(ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c):
         - 0.25 * log(np.linalg.det(ECG_A))
     )
     heller_zeta = -1j * (
-        np.log(ECG_c) - ECG_normalization_log + 1j * heller_p.T @ heller_q - heller_q.T @ D @ heller_q + b @ Dinv @ b
+        np.log(ECG_c)
+        - ECG_normalization_log
+        + 1j * heller_p.T @ heller_q
+        - heller_q.T @ D @ heller_q
+        + b @ Dinv @ b
     )
     return heller_C, heller_q, heller_p, heller_zeta
     "..."
@@ -49,7 +53,10 @@ def transform_heller_ECG(heller_C, heller_q, heller_p, heller_zeta):
         - 0.25 * log(np.linalg.det(ECG_A))
     )
     ECG_c_unnormalized = np.exp(
-        1j * heller_zeta - 1j * heller_p.T @ heller_q + heller_q.T @ D @ heller_q - b @ D_inv @ b
+        1j * heller_zeta
+        - 1j * heller_p.T @ heller_q
+        + heller_q.T @ D @ heller_q
+        - b @ D_inv @ b
     )
     ECG_c = ECG_c_unnormalized  # *np.exp(ECG_normalization_log)
     return ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c
@@ -72,7 +79,9 @@ def transform_ECG_heller_fullyUnnormalized(ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c):
         + d / 4 * log(pi / 2)
         - 0.25 * log(np.linalg.det(ECG_A))
     )
-    heller_zeta = -1j * (np.log(ECG_c) + 1j * heller_p.T @ heller_q - heller_q.T @ D @ heller_q + b @ Dinv @ b)
+    heller_zeta = -1j * (
+        np.log(ECG_c) + 1j * heller_p.T @ heller_q - heller_q.T @ D @ heller_q + b @ Dinv @ b
+    )
     return heller_C, heller_q, heller_p, heller_zeta
 
 
@@ -91,7 +100,9 @@ def eval_ECG(r, ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c):
     d = len(r)
     shift = ECG_mu + 1j * ECG_p
     invA = np.linalg.inv(ECG_A)
-    return ECG_c * exp(-(r - shift).T @ (ECG_A + 1j * ECG_B) @ (r - shift))  # /normalization_inv
+    return ECG_c * exp(
+        -(r - shift).T @ (ECG_A + 1j * ECG_B) @ (r - shift)
+    )  # /normalization_inv
 
 
 def propagate_kinetic_analytical(nonlin_params, lin_params, h):
@@ -116,8 +127,13 @@ def propagate_kinetic_analytical(nonlin_params, lin_params, h):
     mytril_indices = np.tril_indices(nd)
     for i in range(ng):
         L_matrices[i, :, :][mytril_indices] = nonlin_params[i][: int(0.5 * nd * (nd + 1))]
-        K_matrices[i, :, :][mytril_indices] = nonlin_params[i][int(0.5 * nd * (nd + 1)) : (nd * (nd + 1))]
-    vectors = nonlin_params[:, (nd * (nd + 1)) : (nd * (nd + 1)) + nd] + 1j * nonlin_params[:, nd * (nd + 1) + nd :]
+        K_matrices[i, :, :][mytril_indices] = nonlin_params[i][
+            int(0.5 * nd * (nd + 1)) : (nd * (nd + 1))
+        ]
+    vectors = (
+        nonlin_params[:, (nd * (nd + 1)) : (nd * (nd + 1)) + nd]
+        + 1j * nonlin_params[:, nd * (nd + 1) + nd :]
+    )
     matrices = einsum("ijk,ilk->ijl", L_matrices, L_matrices) - 1j
     matrices += 1j
     matrices += 1j * (K_matrices + einsum("ijk->ikj", K_matrices))
@@ -133,7 +149,9 @@ def propagate_kinetic_analytical(nonlin_params, lin_params, h):
         B = np.imag(C)
         mu_ECG = np.real(vectors[i])
         p_ECG = np.imag(vectors[i])
-        heller_C, heller_q, heller_p, heller_zeta = transform_ECG_heller(A, B, mu_ECG, p_ECG, c)
+        heller_C, heller_q, heller_p, heller_zeta = transform_ECG_heller(
+            A, B, mu_ECG, p_ECG, c
+        )
         heller_C_new, heller_q_new, heller_p_new, heller_zeta_new = propagate_kinetic(
             heller_C, heller_q, heller_p, heller_zeta, h
         )
@@ -146,11 +164,10 @@ def propagate_kinetic_analytical(nonlin_params, lin_params, h):
         params_K = Bcopy[np.tril_indices(dim)]
         params = np.concatenate((params_L, params_K, mu_ECG_new, p_ECG_new))
         new_params[i] = params
-        new_lincoeff[i] = c_new / abs(c_new) * abs(c)  # Only the phase is updated - the Gaussians are normalized!
+        new_lincoeff[i] = (
+            c_new / abs(c_new) * abs(c)
+        )  # Only the phase is updated - the Gaussians are normalized!
     return new_params, new_lincoeff
-    # Step 2: Propagate the Gaussians using the kinetic energy operator with time step h/2
-    # Step 3: Transform the Gaussians back to the original form
-    # Step 4: Return the propagated Gaussians
     pass
 
 

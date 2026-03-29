@@ -4,14 +4,12 @@ This repo contains the code required to reproduce the calculations in [this pape
 
 With this code written in Python, it is possible to run arbitrary-dimensional quantum calculations using Rothe's method. It makes use of `mpi4py` for effective parallelization.
 
-This code has previously been published on [zenodo](https://zenodo.org/records/14051077).
+This code has previously been published in a slightly altered form on [zenodo](https://zenodo.org/records/14051077).
 
 ## Requirements
 
-There are two dependency layers:
-
 1. Python packages (`numpy`, `scipy`, `h5py`, `matplotlib`, `sympy`, `mpi4py`)
-2. A system MPI runtime (`OpenMPI` or `MPICH`) required by `mpi4py`
+2. A system MPI installation (e.g. `OpenMPI`) for `mpi4py`
 
 ## Setup (Linux)
 
@@ -27,8 +25,4 @@ sudo apt install -y libopenmpi-dev openmpi-bin
 pip install -r requirements.txt
 ```
 
-## Running Tests
-
-```bash
-pytest
-```
+## Execution example

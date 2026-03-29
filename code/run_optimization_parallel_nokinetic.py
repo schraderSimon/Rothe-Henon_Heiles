@@ -1,8 +1,12 @@
 import os
-from optimization_parallel import *
-import h5py
 import sys
-from numpy import pi, sqrt
+
+import h5py
+import numpy as np
+from mpi4py import MPI
+from numpy import sqrt
+from optimization_parallel import TimeEvolution
+from WF_HenonHeiles_parallel import WF
 
 x = 43
 np.random.seed(x)
@@ -49,17 +53,22 @@ if dimension > 1:
     for i in range(dimension):
         np.random.seed(x + i)
         nonlin_params[0, startparam + i] = start_pos
-        nonlin_params[1:, startparam + i] = ds * (0.5 - np.random.rand(len_initial - 1)) + start_pos
+        nonlin_params[1:, startparam + i] = (
+            ds * (0.5 - np.random.rand(len_initial - 1)) + start_pos
+        )
 else:
     print("Error in setting up nonline_params / params")
     raise NotImplementedError()
-filename = "../outputs/nokineticdata_dimension=%d_dt=%.3f_epsilon=%.3f_lambda=%.3f_initlen=%d_startpos=%.2f.h5" % (
-    dimension,
-    timestep,
-    epsilon,
-    lambda_,
-    len_initial,
-    start_pos,
+filename = (
+    "../outputs/nokineticdata_dimension=%d_dt=%.3f_epsilon=%.3f_lambda=%.3f_initlen=%d_startpos=%.2f.h5"
+    % (
+        dimension,
+        timestep,
+        epsilon,
+        lambda_,
+        len_initial,
+        start_pos,
+    )
 )
 err_t0 = 0
 energy_t0 = 0
