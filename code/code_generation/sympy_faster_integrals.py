@@ -35,18 +35,39 @@ exprs_2 = []
 exprs_4 = []
 exprs_6 = []
 for string in two:
-    tempstring = string.strip().replace("mu", "").replace("z", "").replace("[", "").replace("]", "").replace("*", "")
+    tempstring = (
+        string.strip()
+        .replace("mu", "")
+        .replace("z", "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("*", "")
+    )
     exprs_2.append(tempstring[:6] + "," + tempstring[6:] + "->ijklmnop")
 print(exprs_2)
 print(len(exprs_2))
 for string in four:
-    tempstring = string.strip().replace("mu", "").replace("z", "").replace("[", "").replace("]", "").replace("*", "")
+    tempstring = (
+        string.strip()
+        .replace("mu", "")
+        .replace("z", "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("*", "")
+    )
     exprs_4.append(tempstring[:4] + "," + tempstring[4:] + "->ijklmnop")
 print(exprs_4)
 print(len(exprs_4))
 
 for string in six:
-    tempstring = string.strip().replace("mu", "").replace("z", "").replace("[", "").replace("]", "").replace("*", "")
+    tempstring = (
+        string.strip()
+        .replace("mu", "")
+        .replace("z", "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("*", "")
+    )
     exprs_6.append(tempstring[:2] + "," + tempstring[2:] + "->ijklmnop")
 
 print(exprs_6)

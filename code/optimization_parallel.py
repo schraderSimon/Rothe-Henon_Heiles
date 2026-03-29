@@ -767,8 +767,6 @@ class TimeEvolution:
             left = []
 
         while len(left) > 0:
-            if self.rank == 0:
-                print(left)
             num_bas = len(dfo)
             self.removed_at_prev_timestep = 0
             # print(new_WF.lin_params)
@@ -1091,8 +1089,6 @@ class TimeEvolution:
             ]  # Those that do not contribute (e.g. 1e-6 of the maximum coefficient)
         else:
             left = []
-        if self.rank == 0:
-            print(left)
         while len(left) > 0:
             num_bas = len(dfo)
             self.removed_at_prev_timestep = 0

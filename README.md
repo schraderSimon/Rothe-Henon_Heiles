@@ -29,24 +29,9 @@ pip install -r requirements.txt
 
 Run from the repository root.
 
-If you are already inside `code/`, remove the `code/` prefix from the script path.
-
 Example without using Strang Splitting:
 ```bash
 mpiexec -n 4 python code/run_optimization.py \
-	--t0 0 \
-	--dimension 2 \
-	--timestep 0.01 \
-	--epsilon 10000 \
-	--len-initial 10 \
-	--start-pos 2.0 \
-	--lambda 0.111803
-```
-
-Same command from inside `code/`:
-
-```bash
-mpiexec -n 4 python run_optimization.py \
 	--t0 0 \
 	--dimension 2 \
 	--timestep 0.01 \
