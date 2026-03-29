@@ -379,10 +379,9 @@ class TimeEvolution:
         oldold = np.array(self.params_oldold_nonlin.copy()).flatten()
         old = self.comm.bcast(old, root=0)
         oldold = self.comm.bcast(oldold, root=0)
-        try:
-            direction = old.flatten() - oldold.flatten()
-        except:
+        if old.shape != oldold.shape:
             return old.flatten()
+        direction = old.flatten() - oldold.flatten()
 
         error_set = []
         alphas = np.linspace(0, 1, 6)
@@ -589,7 +588,7 @@ class TimeEvolution:
 
         end = time.time()
         if self.rank == 0:
-            print("Finallo Rothe error: %f/%f" % ((sqrt(rotheerror), self.maxerr)))
+            print("Final Rothe error: %f/%f" % ((sqrt(rotheerror), self.maxerr)))
 
         self.comm.bcast(
             best_nonlin_params, root=0

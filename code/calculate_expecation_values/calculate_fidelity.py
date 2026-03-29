@@ -2,8 +2,10 @@ import sys
 
 sys.path.insert(1, "../")
 
-from optimization_parallel import *
+import h5py
 import matplotlib.pyplot as plt
+import numpy as np
+from WF_HenonHeiles_parallel import WF
 
 dimension = n = int(sys.argv[1])
 timestep = float(sys.argv[2])
@@ -14,22 +16,23 @@ parallel2 = sys.argv[6]
 lambda_ = float(sys.argv[7])
 epsilon = 1000
 startpos = 2
-
-try:
+if len(sys.argv) > 8:
     max_T_steps = int(sys.argv[8])
-
-except:
+else:
     max_T_steps = 100000
 t0 = 0
 if not parallel1 == "parallel":
     print("Not parallel: %s" % parallel1)
-    filename1 = "../../outputs/data_dimension=%d_dt=%.3f_epsilon=%.3f_lambda=%.3f_initlen=%d_startpos=%.2f.h5" % (
-        dimension,
-        timestep,
-        epsilon,
-        lambda_,
-        len_initial1,
-        startpos,
+    filename1 = (
+        "../../outputs/data_dimension=%d_dt=%.3f_epsilon=%.3f_lambda=%.3f_initlen=%d_startpos=%.2f.h5"
+        % (
+            dimension,
+            timestep,
+            epsilon,
+            lambda_,
+            len_initial1,
+            startpos,
+        )
     )
 else:
     filename1 = (
@@ -117,7 +120,10 @@ for i, timev in enumerate(times[:max_T_steps]):
     lin_params2 = all_lin_params2[i]
     nonlin_params2_new = nonlin_params2.copy()
     indices_to_change_sign = np.concatenate(
-        (np.arange(n * (n + 1) // 2, n * (n + 1)), np.arange(n * (n + 1) + n, n * (n + 1) + 2 * n))
+        (
+            np.arange(n * (n + 1) // 2, n * (n + 1)),
+            np.arange(n * (n + 1) + n, n * (n + 1) + 2 * n),
+        )
     )
 
     for index in indices_to_change_sign:

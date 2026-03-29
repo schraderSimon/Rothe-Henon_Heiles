@@ -68,6 +68,14 @@ class WF:
         rank = self.rank
         self.onlyX1X2 = onlyX1X2
         self.update = False
+        self.jvc = None
+        self.ivc = None
+        self.jvnc = None
+        self.ivnc = None
+        self.ic = None
+        self.inc = None
+        self.indices_j_vc = None
+        self.indices_j_vnc = None
         """
         nonlin_params: list of list or 2D array all parameters. The general form is (ngauss,n(n+3))), where n is the dimensionality of the problem
         lin_params: list of same length as nonlin_params
@@ -89,6 +97,7 @@ class WF:
         self.normalization = normalization
         self.calculate_Gradient = calculate_Gradient
         self.h = h
+        self.intermediateshavebeenupdated = False
         self.setupintermediates()
         self.setupmyintermediates()
         self.overlap = self.calculate_myoverlapmatrix(self.myrow_indices, self.mycol_indices)
@@ -290,9 +299,7 @@ class WF:
         new_ij_indices = list(zip(self.mynewrow_indices, self.mynewcol_indices))
         # Next step: Update the x1 and x2 values
         """This step only needs to be done one single time if the indices are not changed. Running it every time is unnecessarily| costly"""
-        try:
-            self.intermediateshavebeenupdated
-        except:
+        if not self.intermediateshavebeenupdated:
             self.updatemyderivativeintermediates(
                 indices_new[0], new_ij_indices
             )  # Definitely the most time consuming step!!
@@ -753,9 +760,7 @@ class WF:
         nd = self.num_dimensions
         ngMs = start_index_WFnew
         if self.update == False:
-            try:
-                self.jvc
-            except:
+            if self.jvc is None:
                 self.setupmyderivintermediates(start_index_WFnew)
             x1_temp = self.x1_temp
             x2_temp = self.x2_temp
@@ -846,9 +851,7 @@ class WF:
         ng = self.num_gaussians
         nd = self.num_dimensions
         ngMs = start_index_WFnew
-        try:
-            self.jvc
-        except:
+        if self.jvc is None:
             self.setupmyderivintermediates(start_index_WFnew)
         ic = self.ic
         inc = self.inc
@@ -950,9 +953,7 @@ class WF:
         ng = self.num_gaussians
         nd = self.num_dimensions
         ngMs = start_index_WFnew
-        try:
-            self.jvc
-        except:
+        if self.jvc is None:
             self.setupmyderivintermediates(start_index_WFnew)
         ic = self.ic
         inc = self.inc
@@ -1100,9 +1101,7 @@ class WF:
         ng = self.num_gaussians
         nd = self.num_dimensions
         ngMs = start_index_WFnew
-        try:
-            self.jvc
-        except:
+        if self.jvc is None:
             self.setupmyderivintermediates(start_index_WFnew)
         ic = self.ic
         inc = self.inc
@@ -1232,9 +1231,7 @@ class WF:
         # n(n+3) parameters specifying the Gaussian.
         ng = self.num_gaussians
         nd = self.num_dimensions
-        try:
-            self.jvc
-        except:
+        if self.jvc is None:
             self.setupmyderivintermediates(start_index_WFnew)
         ic = self.ic
         inc = self.inc
@@ -1583,9 +1580,7 @@ class WF:
         ng = self.num_gaussians
         nd = self.num_dimensions
         ngMs = start_index_WFnew
-        try:
-            self.jvc
-        except:
+        if self.jvc is None:
             self.setupmyderivintermediates(start_index_WFnew)
         ic = self.ic
         inc = self.inc

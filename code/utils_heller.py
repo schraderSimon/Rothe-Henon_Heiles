@@ -168,31 +168,3 @@ def propagate_kinetic_analytical(nonlin_params, lin_params, h):
             c_new / abs(c_new) * abs(c)
         )  # Only the phase is updated - the Gaussians are normalized!
     return new_params, new_lincoeff
-    pass
-
-
-if __name__ == "__main__":
-    ECG_A = np.array([[0.5, 0.1], [0.1, 2]])
-    ECG_B = np.array([[1, 0.2], [0.2, 0.7]])
-    ECG_mu = np.array([-0.4, 0.4])
-    ECG_p = np.array([1, -1])
-    ECG_c = 3
-    olds = [ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c]
-    heller_C, heller_q, heller_p, heller_zeta = transform_ECG_heller_fullyUnnormalized(
-        ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c
-    )
-    ECG_A_new, ECG_B_new, ECG_mu_new, ECG_p_new, ECG_c_new = transform_heller_ECG(
-        heller_C, heller_q, heller_p, heller_zeta
-    )
-    news = [ECG_A_new, ECG_B_new, ECG_mu_new, ECG_p_new, ECG_c_new]
-    istrue = True
-    for i in range(len(olds)):
-        truthval = np.allclose(olds[i], news[i])
-        if not truthval:
-            istrue = False
-    print("Are the results the same: ", istrue)
-    funcvals = np.random.rand(10, 2) * 10 - 5
-    for x, y in funcvals:
-        heller_val = eval_heller(np.array([x, y]), heller_C, heller_q, heller_p, heller_zeta)
-        ECG_val = eval_ECG(np.array([x, y]), ECG_A, ECG_B, ECG_mu, ECG_p, ECG_c)
-        assert np.isclose(heller_val, ECG_val)

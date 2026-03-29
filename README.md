@@ -26,3 +26,65 @@ pip install -r requirements.txt
 ```
 
 ## Execution example
+
+Run from the repository root.
+
+If you are already inside `code/`, remove the `code/` prefix from the script path.
+
+Example without using Strang Splitting:
+```bash
+mpiexec -n 4 python code/run_optimization.py \
+	--t0 0 \
+	--dimension 2 \
+	--timestep 0.01 \
+	--epsilon 10000 \
+	--len-initial 10 \
+	--start-pos 2.0 \
+	--lambda 0.111803
+```
+
+Same command from inside `code/`:
+
+```bash
+mpiexec -n 4 python run_optimization.py \
+	--t0 0 \
+	--dimension 2 \
+	--timestep 0.01 \
+	--epsilon 10000 \
+	--len-initial 10 \
+	--start-pos 2.0 \
+	--lambda 0.111803
+```
+
+Example with using Strang Splitting:
+
+```bash
+mpiexec -n 4 python code/run_optimization.py \
+	--t0 0 \
+	--dimension 2 \
+	--timestep 0.01 \
+	--epsilon 10000 \
+	--len-initial 10 \
+	--start-pos 2.0 \
+	--lambda 0.111803 \
+	--nokinetic
+```
+
+Resume from the latest saved step in the same output file:
+
+```bash
+mpiexec -n 4 python code/run_optimization.py --t0 last
+```
+
+Parameter meaning:
+
+1. `--t0`: starting time (`0` for fresh run, `last` to continue from latest saved step)
+2. `--dimension`: system dimension (for example `2`, `3`, `4`)
+3. `--timestep` / `--dt`: time step size
+4. `--epsilon`: total error budget used in adaptive behavior. Unused in practice (i.e. set this very high)
+5. `--len-initial`: initial number of Gaussians
+6. `--start-pos`: initial center position used when constructing the initial basis: defines energy of initial Gaussian
+7. `--lambda`: Henon-Heiles coupling strength
+8. `--tfinal`: final simulation time
+9. `--nokinetic`: switch to Strang-splitting propagation
+10. `--output`: optional explicit output file path (otherwise auto-generated in `outputs/`)
