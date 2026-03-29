@@ -1,0 +1,9 @@
+numpy
+scipy
+h5py
+matplotlib
+sympy
+mpi4py
+black
+ruff
+pytest
