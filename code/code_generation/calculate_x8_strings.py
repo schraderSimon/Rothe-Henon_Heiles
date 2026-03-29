@@ -1,5 +1,3 @@
-import sys
-
 strings8_6 = [
     "ijklmn,op->ijklmnop",  # ij contractions
     "ijklmo,np->ijklmnop",
@@ -79,7 +77,12 @@ for i, string in enumerate(strings8_6_upd[:]):
     k_counter = 0
     l_counter = 0
     for x in range(6):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             adders.append("[1:]")
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             adders.append("[:-1]")
@@ -88,7 +91,12 @@ for i, string in enumerate(strings8_6_upd[:]):
             adders.append("")
     extraadder = "["
     for x in range(6, 8):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             extraadder += "1:,"
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             extraadder += ":-1,"
@@ -112,9 +120,15 @@ for i, string in enumerate(strings8_6_upd[:]):
         + extraadder
         + ")"
     )
-    finalstring = "contraction_3+=np.einsum(" + finalstring.replace("inp", "y").replace("mu", "x").replace(
-        "l", "k"
-    ).replace("m", "k").replace("n", "l").replace("o", "l").replace("p", "l").replace("x", "mu").replace("y", "inp")
+    finalstring = "contraction_3+=np.einsum(" + finalstring.replace("inp", "y").replace(
+        "mu", "x"
+    ).replace("l", "k").replace("m", "k").replace("n", "l").replace("o", "l").replace(
+        "p", "l"
+    ).replace(
+        "x", "mu"
+    ).replace(
+        "y", "inp"
+    )
     print(finalstring)
 strings8_4 = [
     "ijkl,mnop->ijklmnop",  # ij contraction
@@ -282,7 +296,12 @@ for i, string in enumerate(strings8_4_upd[:]):
     k_counter = 0
     l_counter = 0
     for x in range(4):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             adders.append("[1:]")
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             adders.append("[:-1]")
@@ -291,7 +310,12 @@ for i, string in enumerate(strings8_4_upd[:]):
             adders.append("")
     extraadder = "["
     for x in range(4, 8):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             extraadder += "1:,"
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             extraadder += ":-1,"
@@ -311,7 +335,16 @@ for i, string in enumerate(strings8_4_upd[:]):
     )
     returnstring = "'%s',mu" % string + adders[0]
     finalstring = (
-        returnstring + ",mu" + adders[1] + ",mu" + adders[2] + ",mu" + adders[3] + ",fourh_expecs" + extraadder + ")"
+        returnstring
+        + ",mu"
+        + adders[1]
+        + ",mu"
+        + adders[2]
+        + ",mu"
+        + adders[3]
+        + ",fourh_expecs"
+        + extraadder
+        + ")"
     )
     finalstring = "contraction_3+=np.einsum(" + finalstring
     print(finalstring)
@@ -393,7 +426,12 @@ for i, string in enumerate(strings8_2_upd[:]):
     k_counter = 0
     l_counter = 0
     for x in range(2):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             adders.append("[1:]")
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             adders.append("[:-1]")
@@ -402,7 +440,12 @@ for i, string in enumerate(strings8_2_upd[:]):
             adders.append("")
     extraadder = "["
     for x in range(2, 8):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             extraadder += "1:,"
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             extraadder += ":-1,"
@@ -550,7 +593,12 @@ all_elems = []
 for i, string in enumerate(fullstrings):
     extraadder = ""
     for x in range(0, 8):
-        if fullstrings[i][x] == "k" or fullstrings[i][x] == "l" or fullstrings[i][x] == "m" or fullstrings[i][x] == "p":
+        if (
+            fullstrings[i][x] == "k"
+            or fullstrings[i][x] == "l"
+            or fullstrings[i][x] == "m"
+            or fullstrings[i][x] == "p"
+        ):
             extraadder += "1:,"
         elif fullstrings[i][x] == "n" or fullstrings[i][x] == "o":
             extraadder += ":-1,"
@@ -565,7 +613,12 @@ for i, string in enumerate(fullstrings):
     v4 = "[" + terms[6] + "," + terms[7] + "]"
     returnstring = (
         "contraction_3+=np.einsum('"
-        + assstrings[i].replace("l", "k").replace("m", "k").replace("n", "l").replace("o", "l").replace("p", "l")
+        + assstrings[i]
+        .replace("l", "k")
+        .replace("m", "k")
+        .replace("n", "l")
+        .replace("o", "l")
+        .replace("p", "l")
         + "',inp"
         + v1
         + ",inp"

@@ -17,7 +17,6 @@ from calculate_all_integrals_at_once import (
 )
 from numpy.linalg import det
 from utils import solve
-from utils_heller import transform_ECG_heller, transform_heller_ECG
 
 dx = 1e-7
 
@@ -121,26 +120,21 @@ class WF:
         mymatrices = cross_mat_inv_list[myvals[rank] : myvals[rank + 1]]
         # Screen matrices for small values
         threshold = -1
-        mymatrices_relevantIndices = np.where(np.abs(myovlp) > threshold)
-        # mymatrices_removeIndices=np.where(np.abs(myovlp)<=threshold)
-        myovlp_of_interest = myovlp  # [mymatrices_relevantIndices]
-        mymu_of_interest = mymu  # [mymatrices_relevantIndices]
-        mymatrices_of_interest = mymatrices  # [mymatrices_relevantIndices]
+        myovlp_of_interest = myovlp
+        mymu_of_interest = mymu
+        mymatrices_of_interest = mymatrices
         myTotnumOfElements = len(myovlp)
         if self.h >= 0:  # Only negative h will lead to this not being calculated
-            # start=time.time()
             if self.onlyX1X2:
                 x1_temp, x2_temp = calculate_all_expectation_values_full_allij(
                     mymu_of_interest, mymatrices_of_interest, myovlp_of_interest, order=2
                 )
                 self.x1_temp = np.empty((myTotnumOfElements, self.nd), dtype=np.complex128)
                 self.x1_temp = x1_temp
-                # self.x1_temp[mymatrices_removeIndices]=0
                 self.x2_temp = np.empty(
                     (myTotnumOfElements, self.nd, self.nd), dtype=np.complex128
                 )
                 self.x2_temp = x2_temp
-                # self.x2_temp[mymatrices_removeIndices]=0
 
             else:
                 x1_temp, x2_temp, x3_temp, x4_temp, x5_temp, x6_temp = (
@@ -171,7 +165,6 @@ class WF:
                 )
                 self.x6_temp = x6_temp
             if self.calculate_Gradient and not self.onlyX1X2:
-                # start=time.time()
                 x8_c1, x8_c2, x8_c3, x7_c1, x7_c2, x7_c1v, x7_c2v, x7_c3v, x7_c3, x7_c4 = (
                     get_x7_x8_contraction_allij(mymu, mymatrices, myovlp)
                 )
@@ -185,8 +178,6 @@ class WF:
                 self.x7_c1v_temp = x7_c1v
                 self.x7_c2v_temp = x7_c2v
                 self.x7_c3v_temp = x7_c3v
-                # end=time.time()
-                # print("Time to calculate all hard expectation values on rank %d: %f"%(self.rank,end-start))
         self.setupMatrices()
         self.fodmd = self.calculate_overlap_matrix_log_deriv()
 
@@ -205,10 +196,7 @@ class WF:
                 )
             )
             # Sum all Hamiltonian matrix elements across all processes
-            # start=time.time()
-            self.comm.Allreduce(
-                MPI.IN_PLACE, [big_array, MPI.COMPLEX16], op=MPI.SUM
-            )  # I might not have to do this :)
+            self.comm.Allreduce(MPI.IN_PLACE, [big_array, MPI.COMPLEX16], op=MPI.SUM)
             # Unpack the big array into the individual Hamiltonian matrix elements
             offset = 0
             length = np.prod(self.kinetic.shape)
@@ -329,7 +317,6 @@ class WF:
     def setupintermediates(self):
         nd = self.num_dimensions
         ng = self.num_gaussians
-        # self.vas=np.eye(nd)
         self.L_matrices = np.zeros((ng, nd, nd))
         self.K_matrices = np.zeros((ng, nd, nd))
         self.Iab = np.zeros((nd, nd, nd, nd))
@@ -688,7 +675,6 @@ class WF:
                     self.vectors[i].T @ self.matrices[i]
                 )
                 exponent = +bvec.T @ sum_matrix_inv @ bvec - vmips[j] - np.conj(vmips[i])
-                # print(exponent)
                 self.overlap_matrix[i, j] *= np.exp(exponent)
                 self.overlap_matrix[j, i] = np.conj(self.overlap_matrix[i, j])
         self.overlap_matrix *= pi ** (self.num_dimensions / 2)

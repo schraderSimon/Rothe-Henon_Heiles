@@ -4,43 +4,30 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+from mpi4py import MPI
 from numpy import sqrt
-
-MODE_DEFAULTS = {
-    "serial": {"epsilon": 1.0, "timestep": 0.025, "len_initial": 1},
-    "parallel": {"epsilon": 28.0, "timestep": 0.01, "len_initial": 2},
-    "nokinetic": {"epsilon": 28.0, "timestep": 0.01, "len_initial": 2},
-}
+from optimization_parallel import TimeEvolution
+from WF_HenonHeiles_parallel import WF
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--mode", choices=["serial", "parallel", "nokinetic"], default="parallel"
-    )
-    parser.add_argument("--t0", default="0", help="float or 'last' (parallel/nokinetic only)")
-    parser.add_argument("--epsilon", type=float, default=None)
+    parser.add_argument("--t0", default="0", help="float or 'last'")
+    parser.add_argument("--epsilon", type=float, default=10000)
     parser.add_argument("--dimension", type=int, default=2)
-    parser.add_argument("--timestep", "--dt", dest="timestep", type=float, default=None)
-    parser.add_argument("--len-initial", type=int, default=None)
+    parser.add_argument("--timestep", "--dt", dest="timestep", type=float, default=0.01)
+    parser.add_argument("--len-initial", type=int, default=10)
     parser.add_argument("--start-pos", type=float, default=2.0)
     parser.add_argument("--lambda", dest="lambda_", type=float, default=0.111803)
     parser.add_argument("--tfinal", type=float, default=100.0)
     parser.add_argument("--seed", type=int, default=43)
     parser.add_argument("--output", type=str, default=None)
+    parser.add_argument("--nokinetic", action="store_true")
     args = parser.parse_args()
-
-    defaults = MODE_DEFAULTS[args.mode]
-    if args.epsilon is None:
-        args.epsilon = defaults["epsilon"]
-    if args.timestep is None:
-        args.timestep = defaults["timestep"]
-    if args.len_initial is None:
-        args.len_initial = defaults["len_initial"]
     return args
 
 
-def init_params(dimension: int, len_initial: int, start_pos: float, seed: int):
+def init_params(dimension, len_initial, start_pos, seed):
     if dimension <= 1:
         raise NotImplementedError("dimension must be > 1")
 
@@ -64,12 +51,10 @@ def init_params(dimension: int, len_initial: int, start_pos: float, seed: int):
     return nonlin, lin
 
 
-def output_path(args: argparse.Namespace) -> Path:
+def output_path(args):
     if args.output:
         return Path(args.output)
-    prefix = {"serial": "data", "parallel": "paralleldata", "nokinetic": "nokineticdata"}[
-        args.mode
-    ]
+    prefix = "nokineticdata" if args.nokinetic else "paralleldata"
     outputs = Path(__file__).resolve().parent.parent / "outputs"
     outputs.mkdir(parents=True, exist_ok=True)
     name = (
@@ -79,7 +64,7 @@ def output_path(args: argparse.Namespace) -> Path:
     return outputs / name
 
 
-def load_state(filename: Path, t0):
+def load_state(filename, t0):
     with h5py.File(filename, "r") as f:
         times = np.array(f["times"])
         idx = len(times) - 1 if t0 == "last" else int(np.argmin(abs(times - t0)))
@@ -93,34 +78,7 @@ def load_state(filename: Path, t0):
         return nonlin, lin, tsel, err, norm, energy
 
 
-def run_serial(args: argparse.Namespace, filename: Path, nonlin, lin):
-    from optimization import TimeEvolution
-    from WF_HenonHeiles import WF
-
-    t0 = float(args.t0)
-    err_t0 = 0.0
-    if t0 >= args.timestep - 1e-5:
-        nonlin, lin, t0, err_t0, _, _ = load_state(filename, t0)
-
-    wf = WF(nonlin, lin, lambda_=args.lambda_)
-    print("E0:")
-    print(lin.T @ wf.calculate_Hamiltonian() @ lin)
-    TimeEvolution(
-        wf,
-        h=args.timestep,
-        T=args.tfinal,
-        epsilon=args.epsilon,
-        t0=t0,
-        error_t0=err_t0,
-        filename=str(filename),
-        dimension=args.dimension,
-    ).time_evolver()
-
-
-def run_parallel(args: argparse.Namespace, filename: Path, nonlin, lin):
-    from mpi4py import MPI
-    from optimization_parallel import TimeEvolution
-    from WF_HenonHeiles_parallel import WF
+def run_parallel(args, filename, nonlin, lin):
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -160,21 +118,14 @@ def run_parallel(args: argparse.Namespace, filename: Path, nonlin, lin):
         norm=norm_t0,
         energy=energy_t0,
     )
-    evolver.time_evolver(type="nokinetic" if args.mode == "nokinetic" else "full")
+    evolver.time_evolver(type="nokinetic" if args.nokinetic else "full")
 
 
 def main() -> None:
     args = parse_args()
-    if args.mode == "serial" and str(args.t0).lower() == "last":
-        raise ValueError("--t0 last is only valid for parallel/nokinetic")
-
     nonlin, lin = init_params(args.dimension, args.len_initial, args.start_pos, args.seed)
     filename = output_path(args)
-
-    if args.mode == "serial":
-        run_serial(args, filename, nonlin, lin)
-    else:
-        run_parallel(args, filename, nonlin, lin)
+    run_parallel(args, filename, nonlin, lin)
 
 
 if __name__ == "__main__":
